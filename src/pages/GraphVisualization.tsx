@@ -8,11 +8,12 @@ import { toast } from 'sonner';
 
 const GraphVisualization = () => {
   const [activeTool, setActiveTool] = useState<'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath'>('addNode');
-  const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
+  const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [], masterPaths: [] });
   const [optimalMST, setOptimalMST] = useState<Array<{from: string, to: string}> | undefined>();
   const [showOptimalPaths, setShowOptimalPaths] = useState(false);
   const [optimalDistance, setOptimalDistance] = useState<number | undefined>();
   const [autoOptimalEnabled, setAutoOptimalEnabled] = useState(true);
+  const [isDrawingMasterPath, setIsDrawingMasterPath] = useState(false);
 
   // Calcular automáticamente el MST cuando cambia el grafo
   useEffect(() => {
@@ -36,16 +37,33 @@ const GraphVisualization = () => {
   }, [graph, autoOptimalEnabled]);
 
   const handleClear = () => {
-    setGraph({ nodes: [], edges: [] });
+    setGraph({ nodes: [], edges: [], masterPaths: [] });
     setOptimalMST(undefined);
     setShowOptimalPaths(false);
     setOptimalDistance(undefined);
+    setIsDrawingMasterPath(false);
     toast.success('Canvas limpiado');
   };
 
   const handleToggleAutoOptimal = () => {
     setAutoOptimalEnabled(!autoOptimalEnabled);
     toast.info(`Auto-óptimo ${!autoOptimalEnabled ? 'activado' : 'desactivado'}`);
+  };
+
+  const handleToolChange = (tool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath') => {
+    if (tool === 'masterPath' && !isDrawingMasterPath) {
+      setIsDrawingMasterPath(true);
+      toast.info('Dibuja el camino maestro. Haz clic en "Finalizar" cuando termines.');
+    } else if (tool !== 'masterPath' && isDrawingMasterPath) {
+      setIsDrawingMasterPath(false);
+    }
+    setActiveTool(tool);
+  };
+
+  const handleFinishMasterPath = () => {
+    setIsDrawingMasterPath(false);
+    setActiveTool('select');
+    toast.success('Camino maestro finalizado');
   };
 
   return (
@@ -62,13 +80,15 @@ const GraphVisualization = () => {
 
         <Toolbar
           activeTool={activeTool}
-          onToolChange={setActiveTool}
+          onToolChange={handleToolChange}
           onClear={handleClear}
           onToggleAutoOptimal={handleToggleAutoOptimal}
           autoOptimalEnabled={autoOptimalEnabled}
           nodeCount={graph.nodes.length}
           edgeCount={graph.edges.length}
           optimalDistance={optimalDistance}
+          isDrawingMasterPath={isDrawingMasterPath}
+          onFinishMasterPath={handleFinishMasterPath}
         />
 
         <div className="flex justify-center">
@@ -78,6 +98,7 @@ const GraphVisualization = () => {
             onGraphChange={setGraph}
             optimalMST={optimalMST}
             showOptimalPaths={showOptimalPaths}
+            isDrawingMasterPath={isDrawingMasterPath}
           />
         </div>
 
@@ -90,7 +111,7 @@ const GraphVisualization = () => {
                 <li><strong>Agregar Bloque:</strong> Haz clic en el canvas para agregar nuevos bloques</li>
                 <li><strong>Conectar:</strong> Haz clic en dos bloques para crear una conexión manual</li>
                 <li><strong>Marcar Principal:</strong> Haz clic en un bloque para marcarlo como punto de inicio</li>
-                <li><strong>Camino Maestro:</strong> Conecta bloques que deben estar obligatoriamente en la ruta</li>
+                <li><strong>Camino Maestro:</strong> Dibuja una polilínea que debe ser respetada en la ruta</li>
                 <li><strong>Seleccionar:</strong> Arrastra bloques para reposicionarlos</li>
               </ul>
             </div>

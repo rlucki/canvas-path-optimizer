@@ -1,5 +1,6 @@
+
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Node, Edge, Graph } from '@/types/graph';
+import { Node, Edge, Graph, MasterPath } from '@/types/graph';
 import { toast } from 'sonner';
 
 interface GraphCanvasProps {
@@ -8,6 +9,7 @@ interface GraphCanvasProps {
   onGraphChange: (graph: Graph) => void;
   optimalMST?: Array<{from: string, to: string}>;
   showOptimalPaths: boolean;
+  isDrawingMasterPath: boolean;
 }
 
 export const GraphCanvas = ({
@@ -15,13 +17,16 @@ export const GraphCanvas = ({
   graph,
   onGraphChange,
   optimalMST,
-  showOptimalPaths
+  showOptimalPaths,
+  isDrawingMasterPath
 }: GraphCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [edgeStart, setEdgeStart] = useState<string | null>(null);
+  const [currentMasterPath, setCurrentMasterPath] = useState<Array<{ x: number; y: number }>>([]);
+  const [isDrawing, setIsDrawing] = useState(false);
 
   const getCanvasCoordinates = useCallback((event: MouseEvent | React.MouseEvent) => {
     const canvas = canvasRef.current;
@@ -43,6 +48,8 @@ export const GraphCanvas = ({
   }, [graph.nodes]);
 
   const handleCanvasClick = useCallback((event: React.MouseEvent) => {
+    if (isDrawingMasterPath) return; // No permitir clicks normales mientras se dibuja
+    
     const coords = getCanvasCoordinates(event);
     const clickedNode = findNodeAt(coords.x, coords.y);
 
@@ -58,19 +65,18 @@ export const GraphCanvas = ({
           };
 
           onGraphChange({
-            nodes: [...graph.nodes, newNode],
-            edges: graph.edges
+            ...graph,
+            nodes: [...graph.nodes, newNode]
           });
           toast.success(`${newNode.label} agregado`);
         }
         break;
 
       case 'addEdge':
-      case 'masterPath':
         if (clickedNode) {
           if (!edgeStart) {
             setEdgeStart(clickedNode.id);
-            toast.info(`Selecciona el segundo bloque para ${activeTool === 'masterPath' ? 'crear camino maestro' : 'conectar'}`);
+            toast.info('Selecciona el segundo bloque para conectar');
           } else if (edgeStart !== clickedNode.id) {
             const edgeExists = graph.edges.some(edge =>
               (edge.from === edgeStart && edge.to === clickedNode.id) ||
@@ -83,13 +89,13 @@ export const GraphCanvas = ({
                 from: edgeStart,
                 to: clickedNode.id,
                 weight: 1,
-                isMaster: activeTool === 'masterPath'
+                isMaster: false
               };
               onGraphChange({
                 ...graph,
                 edges: [...graph.edges, newEdge]
               });
-              toast.success(activeTool === 'masterPath' ? 'Camino maestro creado' : 'Conexión creada');
+              toast.success('Conexión creada');
             } else {
               toast.warning('Ya existe una conexión entre estos bloques');
             }
@@ -118,9 +124,16 @@ export const GraphCanvas = ({
         setSelectedNode(clickedNode?.id || null);
         break;
     }
-  }, [activeTool, graph, onGraphChange, edgeStart, getCanvasCoordinates, findNodeAt]);
+  }, [activeTool, graph, onGraphChange, edgeStart, getCanvasCoordinates, findNodeAt, isDrawingMasterPath]);
 
   const handleMouseDown = useCallback((event: React.MouseEvent) => {
+    if (isDrawingMasterPath && activeTool === 'masterPath') {
+      const coords = getCanvasCoordinates(event);
+      setCurrentMasterPath([coords]);
+      setIsDrawing(true);
+      return;
+    }
+
     if (activeTool !== 'select') return;
     
     const coords = getCanvasCoordinates(event);
@@ -133,12 +146,25 @@ export const GraphCanvas = ({
         y: coords.y - clickedNode.y
       });
     }
-  }, [activeTool, getCanvasCoordinates, findNodeAt]);
+  }, [activeTool, getCanvasCoordinates, findNodeAt, isDrawingMasterPath]);
 
   const handleMouseMove = useCallback((event: React.MouseEvent) => {
+    const coords = getCanvasCoordinates(event);
+
+    if (isDrawing && isDrawingMasterPath && activeTool === 'masterPath') {
+      // Agregar punto a la polilínea si está lo suficientemente lejos del último punto
+      const lastPoint = currentMasterPath[currentMasterPath.length - 1];
+      if (lastPoint) {
+        const distance = Math.sqrt(Math.pow(coords.x - lastPoint.x, 2) + Math.pow(coords.y - lastPoint.y, 2));
+        if (distance > 10) { // Mínima distancia entre puntos
+          setCurrentMasterPath(prev => [...prev, coords]);
+        }
+      }
+      return;
+    }
+
     if (!draggedNode || activeTool !== 'select') return;
     
-    const coords = getCanvasCoordinates(event);
     const updatedNodes = graph.nodes.map(node =>
       node.id === draggedNode
         ? { ...node, x: coords.x - dragOffset.x, y: coords.y - dragOffset.y }
@@ -149,11 +175,37 @@ export const GraphCanvas = ({
       ...graph,
       nodes: updatedNodes
     });
-  }, [draggedNode, activeTool, graph, onGraphChange, dragOffset, getCanvasCoordinates]);
+  }, [draggedNode, activeTool, graph, onGraphChange, dragOffset, getCanvasCoordinates, isDrawing, isDrawingMasterPath, currentMasterPath]);
 
   const handleMouseUp = useCallback(() => {
+    if (isDrawing && isDrawingMasterPath) {
+      if (currentMasterPath.length > 1) {
+        const newMasterPath: MasterPath = {
+          id: `masterpath-${Date.now()}`,
+          points: currentMasterPath,
+          isComplete: false
+        };
+        
+        onGraphChange({
+          ...graph,
+          masterPaths: [...graph.masterPaths, newMasterPath]
+        });
+      }
+      setCurrentMasterPath([]);
+      setIsDrawing(false);
+      return;
+    }
+
     setDraggedNode(null);
-  }, []);
+  }, [isDrawing, isDrawingMasterPath, currentMasterPath, graph, onGraphChange]);
+
+  // Limpiar camino maestro cuando se cambia de herramienta
+  useEffect(() => {
+    if (!isDrawingMasterPath) {
+      setCurrentMasterPath([]);
+      setIsDrawing(false);
+    }
+  }, [isDrawingMasterPath]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -182,7 +234,43 @@ export const GraphCanvas = ({
       ctx.stroke();
     }
 
-    // Draw manual edges first
+    // Draw completed master paths
+    graph.masterPaths.forEach(masterPath => {
+      if (masterPath.points.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(masterPath.points[0].x, masterPath.points[0].y);
+        
+        for (let i = 1; i < masterPath.points.length; i++) {
+          ctx.lineTo(masterPath.points[i].x, masterPath.points[i].y);
+        }
+        
+        ctx.strokeStyle = '#9333ea';
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
+    });
+
+    // Draw current master path being drawn
+    if (currentMasterPath.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(currentMasterPath[0].x, currentMasterPath[0].y);
+      
+      for (let i = 1; i < currentMasterPath.length; i++) {
+        ctx.lineTo(currentMasterPath[i].x, currentMasterPath[i].y);
+      }
+      
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.setLineDash([10, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw manual edges
     graph.edges.forEach(edge => {
       const fromNode = graph.nodes.find(n => n.id === edge.from);
       const toNode = graph.nodes.find(n => n.id === edge.to);
@@ -192,13 +280,8 @@ export const GraphCanvas = ({
         ctx.moveTo(fromNode.x, fromNode.y);
         ctx.lineTo(toNode.x, toNode.y);
         
-        if (edge.isMaster) {
-          ctx.strokeStyle = '#9333ea';
-          ctx.lineWidth = 4;
-        } else {
-          ctx.strokeStyle = '#64748b';
-          ctx.lineWidth = 2;
-        }
+        ctx.strokeStyle = '#64748b';
+        ctx.lineWidth = 2;
         ctx.stroke();
 
         // Draw distance label
@@ -206,7 +289,7 @@ export const GraphCanvas = ({
         const midY = (fromNode.y + toNode.y) / 2;
         const distance = Math.sqrt(Math.pow(toNode.x - fromNode.x, 2) + Math.pow(toNode.y - fromNode.y, 2));
         
-        ctx.fillStyle = edge.isMaster ? '#9333ea' : '#475569';
+        ctx.fillStyle = '#475569';
         ctx.font = '12px sans-serif';
         ctx.fillText(distance.toFixed(0), midX + 5, midY - 5);
       }
@@ -255,7 +338,7 @@ export const GraphCanvas = ({
     });
 
     // Draw edge preview when creating edge
-    if (edgeStart && (activeTool === 'addEdge' || activeTool === 'masterPath')) {
+    if (edgeStart && activeTool === 'addEdge') {
       const startNode = graph.nodes.find(n => n.id === edgeStart);
       if (startNode) {
         ctx.beginPath();
@@ -265,7 +348,7 @@ export const GraphCanvas = ({
         ctx.stroke();
       }
     }
-  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST]);
+  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath]);
 
   useEffect(() => {
     draw();
@@ -277,7 +360,7 @@ export const GraphCanvas = ({
         ref={canvasRef}
         width={800}
         height={600}
-        className="cursor-crosshair"
+        className={isDrawingMasterPath ? "cursor-crosshair" : "cursor-crosshair"}
         onClick={handleCanvasClick}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}

@@ -12,6 +12,8 @@ interface ToolbarProps {
   nodeCount: number;
   edgeCount: number;
   optimalDistance?: number;
+  isDrawingMasterPath: boolean;
+  onFinishMasterPath: () => void;
 }
 
 export const Toolbar = ({
@@ -22,7 +24,9 @@ export const Toolbar = ({
   autoOptimalEnabled,
   nodeCount,
   edgeCount,
-  optimalDistance
+  optimalDistance,
+  isDrawingMasterPath,
+  onFinishMasterPath
 }: ToolbarProps) => {
   return (
     <Card className="w-full">
@@ -33,6 +37,7 @@ export const Toolbar = ({
               variant={activeTool === 'select' ? 'default' : 'outline'}
               onClick={() => onToolChange('select')}
               size="sm"
+              disabled={isDrawingMasterPath}
             >
               Seleccionar
             </Button>
@@ -40,6 +45,7 @@ export const Toolbar = ({
               variant={activeTool === 'addNode' ? 'default' : 'outline'}
               onClick={() => onToolChange('addNode')}
               size="sm"
+              disabled={isDrawingMasterPath}
             >
               Agregar Bloque
             </Button>
@@ -47,6 +53,7 @@ export const Toolbar = ({
               variant={activeTool === 'addEdge' ? 'default' : 'outline'}
               onClick={() => onToolChange('addEdge')}
               size="sm"
+              disabled={isDrawingMasterPath}
             >
               Conectar
             </Button>
@@ -54,6 +61,7 @@ export const Toolbar = ({
               variant={activeTool === 'setMain' ? 'default' : 'outline'}
               onClick={() => onToolChange('setMain')}
               size="sm"
+              disabled={isDrawingMasterPath}
             >
               Marcar Principal
             </Button>
@@ -63,8 +71,18 @@ export const Toolbar = ({
               size="sm"
               className="bg-purple-600 hover:bg-purple-700 text-white"
             >
-              Camino Maestro
+              {isDrawingMasterPath ? 'Dibujando...' : 'Camino Maestro'}
             </Button>
+            {isDrawingMasterPath && (
+              <Button
+                onClick={onFinishMasterPath}
+                variant="default"
+                size="sm"
+                className="bg-green-600 hover:bg-green-700"
+              >
+                Finalizar
+              </Button>
+            )}
           </div>
           
           <div className="flex gap-2">
@@ -73,6 +91,7 @@ export const Toolbar = ({
               variant={autoOptimalEnabled ? 'default' : 'outline'}
               className={autoOptimalEnabled ? 'bg-green-600 hover:bg-green-700' : ''}
               size="sm"
+              disabled={isDrawingMasterPath}
             >
               {autoOptimalEnabled ? 'Auto-Óptimo ON' : 'Auto-Óptimo OFF'}
             </Button>
@@ -80,6 +99,7 @@ export const Toolbar = ({
               onClick={onClear}
               variant="destructive"
               size="sm"
+              disabled={isDrawingMasterPath}
             >
               Limpiar Todo
             </Button>

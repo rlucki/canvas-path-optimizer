@@ -12,12 +12,19 @@ export interface Edge {
   from: string;
   to: string;
   weight: number;
-  isMaster?: boolean; // Nuevo: marca si es parte del camino maestro
+  isMaster?: boolean;
+}
+
+export interface MasterPath {
+  id: string;
+  points: Array<{ x: number; y: number }>;
+  isComplete: boolean;
 }
 
 export interface Graph {
   nodes: Node[];
   edges: Edge[];
+  masterPaths: MasterPath[];
 }
 
 export interface PathResult {
