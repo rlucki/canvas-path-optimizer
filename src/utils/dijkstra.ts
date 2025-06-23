@@ -93,53 +93,81 @@ export class GraphAlgorithms {
     return results;
   }
 
-  static findMinimumSpanningTree(graph: Graph): { edges: string[], totalWeight: number } {
+  static findMinimumSpanningTree(graph: Graph): { edges: Array<{from: string, to: string}>, totalWeight: number } {
     if (graph.nodes.length === 0) return { edges: [], totalWeight: 0 };
+    if (graph.nodes.length === 1) return { edges: [], totalWeight: 0 };
 
-    const mstEdges: string[] = [];
-    const visited = new Set<string>();
+    // Crear todas las posibles conexiones con sus pesos
+    const allPossibleEdges: Array<{from: string, to: string, weight: number}> = [];
+    
+    for (let i = 0; i < graph.nodes.length; i++) {
+      for (let j = i + 1; j < graph.nodes.length; j++) {
+        const nodeA = graph.nodes[i];
+        const nodeB = graph.nodes[j];
+        const weight = this.calculateDistance(nodeA.x, nodeA.y, nodeB.x, nodeB.y);
+        
+        allPossibleEdges.push({
+          from: nodeA.id,
+          to: nodeB.id,
+          weight
+        });
+      }
+    }
+
+    // Ordenar por peso (algoritmo de Kruskal)
+    allPossibleEdges.sort((a, b) => a.weight - b.weight);
+
+    // Union-Find para detectar ciclos
+    const parent = new Map<string, string>();
+    const rank = new Map<string, number>();
+
+    // Inicializar Union-Find
+    graph.nodes.forEach(node => {
+      parent.set(node.id, node.id);
+      rank.set(node.id, 0);
+    });
+
+    const find = (x: string): string => {
+      if (parent.get(x) !== x) {
+        parent.set(x, find(parent.get(x)!));
+      }
+      return parent.get(x)!;
+    };
+
+    const union = (x: string, y: string): boolean => {
+      const rootX = find(x);
+      const rootY = find(y);
+      
+      if (rootX === rootY) return false;
+      
+      const rankX = rank.get(rootX) || 0;
+      const rankY = rank.get(rootY) || 0;
+      
+      if (rankX < rankY) {
+        parent.set(rootX, rootY);
+      } else if (rankX > rankY) {
+        parent.set(rootY, rootX);
+      } else {
+        parent.set(rootY, rootX);
+        rank.set(rootX, rankX + 1);
+      }
+      
+      return true;
+    };
+
+    const mstEdges: Array<{from: string, to: string}> = [];
     let totalWeight = 0;
 
-    // Start with the main node or first node
-    const mainNode = graph.nodes.find(n => n.isMain) || graph.nodes[0];
-    visited.add(mainNode.id);
-
-    while (visited.size < graph.nodes.length) {
-      let minEdge: { id: string, weight: number } | null = null;
-
-      graph.edges.forEach(edge => {
-        const fromVisited = visited.has(edge.from);
-        const toVisited = visited.has(edge.to);
-
-        // Edge connects visited to unvisited
-        if (fromVisited !== toVisited) {
-          const fromNode = graph.nodes.find(n => n.id === edge.from);
-          const toNode = graph.nodes.find(n => n.id === edge.to);
-          
-          if (fromNode && toNode) {
-            const weight = this.calculateDistance(
-              fromNode.x, fromNode.y,
-              toNode.x, toNode.y
-            );
-
-            if (!minEdge || weight < minEdge.weight) {
-              minEdge = { id: edge.id, weight };
-            }
-          }
-        }
-      });
-
-      if (minEdge) {
-        mstEdges.push(minEdge.id);
-        totalWeight += minEdge.weight;
+    // Algoritmo de Kruskal
+    for (const edge of allPossibleEdges) {
+      if (union(edge.from, edge.to)) {
+        mstEdges.push({from: edge.from, to: edge.to});
+        totalWeight += edge.weight;
         
-        const edge = graph.edges.find(e => e.id === minEdge!.id);
-        if (edge) {
-          visited.add(edge.from);
-          visited.add(edge.to);
+        // Si ya tenemos n-1 aristas, hemos terminado
+        if (mstEdges.length === graph.nodes.length - 1) {
+          break;
         }
-      } else {
-        break; // No more edges to add
       }
     }
 

@@ -1,14 +1,12 @@
-
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Node, Edge, Graph } from '@/types/graph';
-import { GraphAlgorithms } from '@/utils/dijkstra';
 import { toast } from 'sonner';
 
 interface GraphCanvasProps {
   activeTool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath';
   graph: Graph;
   onGraphChange: (graph: Graph) => void;
-  optimalPaths?: Map<string, any>;
+  optimalMST?: Array<{from: string, to: string}>;
   showOptimalPaths: boolean;
 }
 
@@ -16,7 +14,7 @@ export const GraphCanvas = ({
   activeTool,
   graph,
   onGraphChange,
-  optimalPaths,
+  optimalMST,
   showOptimalPaths
 }: GraphCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -59,25 +57,11 @@ export const GraphCanvas = ({
             label: `Bloque ${graph.nodes.length + 1}`
           };
 
-          // Crear conexión automática al nodo principal si hay más de un nodo
-          const mainNode = graph.nodes.find(n => n.isMain);
-          let newEdges = [...graph.edges];
-          
-          if (mainNode && graph.nodes.length > 0) {
-            const autoEdge: Edge = {
-              id: `edge-${Date.now()}`,
-              from: mainNode.id,
-              to: newNode.id,
-              weight: 1
-            };
-            newEdges.push(autoEdge);
-          }
-
           onGraphChange({
             nodes: [...graph.nodes, newNode],
-            edges: newEdges
+            edges: graph.edges
           });
-          toast.success(`${newNode.label} agregado${mainNode ? ' y conectado automáticamente' : ''}`);
+          toast.success(`${newNode.label} agregado`);
         }
         break;
 
@@ -198,7 +182,7 @@ export const GraphCanvas = ({
       ctx.stroke();
     }
 
-    // Draw edges (normal first, then master path, then optimal)
+    // Draw manual edges first
     graph.edges.forEach(edge => {
       const fromNode = graph.nodes.find(n => n.id === edge.from);
       const toNode = graph.nodes.find(n => n.id === edge.to);
@@ -228,26 +212,21 @@ export const GraphCanvas = ({
       }
     });
 
-    // Draw optimal paths if showing
-    if (showOptimalPaths && optimalPaths) {
-      const mainNode = graph.nodes.find(n => n.isMain);
-      if (mainNode) {
-        optimalPaths.forEach((pathResult, targetNodeId) => {
-          for (let i = 0; i < pathResult.path.length - 1; i++) {
-            const fromNode = graph.nodes.find(n => n.id === pathResult.path[i]);
-            const toNode = graph.nodes.find(n => n.id === pathResult.path[i + 1]);
-            
-            if (fromNode && toNode) {
-              ctx.beginPath();
-              ctx.moveTo(fromNode.x, fromNode.y);
-              ctx.lineTo(toNode.x, toNode.y);
-              ctx.strokeStyle = '#16a34a';
-              ctx.lineWidth = 6;
-              ctx.stroke();
-            }
-          }
-        });
-      }
+    // Draw optimal MST if showing
+    if (showOptimalPaths && optimalMST) {
+      optimalMST.forEach(mstEdge => {
+        const fromNode = graph.nodes.find(n => n.id === mstEdge.from);
+        const toNode = graph.nodes.find(n => n.id === mstEdge.to);
+        
+        if (fromNode && toNode) {
+          ctx.beginPath();
+          ctx.moveTo(fromNode.x, fromNode.y);
+          ctx.lineTo(toNode.x, toNode.y);
+          ctx.strokeStyle = '#16a34a';
+          ctx.lineWidth = 6;
+          ctx.stroke();
+        }
+      });
     }
 
     // Draw nodes
@@ -276,7 +255,7 @@ export const GraphCanvas = ({
     });
 
     // Draw edge preview when creating edge
-    if (edgeStart && activeTool === 'addEdge') {
+    if (edgeStart && (activeTool === 'addEdge' || activeTool === 'masterPath')) {
       const startNode = graph.nodes.find(n => n.id === edgeStart);
       if (startNode) {
         ctx.beginPath();
@@ -286,7 +265,7 @@ export const GraphCanvas = ({
         ctx.stroke();
       }
     }
-  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalPaths]);
+  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST]);
 
   useEffect(() => {
     draw();
