@@ -1,4 +1,3 @@
-
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Node, Edge, Graph, MasterPath } from '@/types/graph';
 import { toast } from 'sonner';
@@ -46,6 +45,49 @@ export const GraphCanvas = ({
       return Math.sqrt(dx * dx + dy * dy) <= 25;
     }) || null;
   }, [graph.nodes]);
+
+  const findClosestPointOnMasterPath = useCallback((nodeX: number, nodeY: number, masterPath: Array<{x: number, y: number}>): {point: {x: number, y: number}, distance: number} => {
+    let minDistance = Infinity;
+    let closestPoint = masterPath[0];
+
+    for (let i = 0; i < masterPath.length - 1; i++) {
+      const start = masterPath[i];
+      const end = masterPath[i + 1];
+      
+      const A = nodeX - start.x;
+      const B = nodeY - start.y;
+      const C = end.x - start.x;
+      const D = end.y - start.y;
+
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      
+      let param = -1;
+      if (lenSq !== 0) {
+        param = dot / lenSq;
+      }
+
+      let xx, yy;
+      if (param < 0) {
+        xx = start.x;
+        yy = start.y;
+      } else if (param > 1) {
+        xx = end.x;
+        yy = end.y;
+      } else {
+        xx = start.x + param * C;
+        yy = start.y + param * D;
+      }
+
+      const distance = Math.sqrt(Math.pow(nodeX - xx, 2) + Math.pow(nodeY - yy, 2));
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestPoint = {x: xx, y: yy};
+      }
+    }
+
+    return {point: closestPoint, distance: minDistance};
+  }, []);
 
   const handleCanvasClick = useCallback((event: React.MouseEvent) => {
     if (isDrawingMasterPath) return; // No permitir clicks normales mientras se dibuja
@@ -284,7 +326,6 @@ export const GraphCanvas = ({
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Draw distance label
         const midX = (fromNode.x + toNode.x) / 2;
         const midY = (fromNode.y + toNode.y) / 2;
         const distance = Math.sqrt(Math.pow(toNode.x - fromNode.x, 2) + Math.pow(toNode.y - fromNode.y, 2));
@@ -295,19 +336,56 @@ export const GraphCanvas = ({
       }
     });
 
-    // Draw optimal MST if showing
+    // Draw optimal MST that respects master path
     if (showOptimalPaths && optimalMST) {
+      const masterPath = graph.masterPaths.length > 0 ? graph.masterPaths[0] : null;
+      
       optimalMST.forEach(mstEdge => {
         const fromNode = graph.nodes.find(n => n.id === mstEdge.from);
         const toNode = graph.nodes.find(n => n.id === mstEdge.to);
         
         if (fromNode && toNode) {
-          ctx.beginPath();
-          ctx.moveTo(fromNode.x, fromNode.y);
-          ctx.lineTo(toNode.x, toNode.y);
-          ctx.strokeStyle = '#16a34a';
-          ctx.lineWidth = 6;
-          ctx.stroke();
+          if (masterPath && masterPath.points.length > 1) {
+            // Dibujar conexión a través del camino maestro
+            const closestA = findClosestPointOnMasterPath(fromNode.x, fromNode.y, masterPath.points);
+            const closestB = findClosestPointOnMasterPath(toNode.x, toNode.y, masterPath.points);
+            
+            // Línea del nodo A al camino maestro
+            ctx.beginPath();
+            ctx.moveTo(fromNode.x, fromNode.y);
+            ctx.lineTo(closestA.point.x, closestA.point.y);
+            ctx.strokeStyle = '#16a34a';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Línea del camino maestro al nodo B
+            ctx.beginPath();
+            ctx.moveTo(closestB.point.x, closestB.point.y);
+            ctx.lineTo(toNode.x, toNode.y);
+            ctx.strokeStyle = '#16a34a';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Destacar el segmento del camino maestro que se usa
+            ctx.beginPath();
+            ctx.moveTo(closestA.point.x, closestA.point.y);
+            ctx.lineTo(closestB.point.x, closestB.point.y);
+            ctx.strokeStyle = '#16a34a';
+            ctx.lineWidth = 6;
+            ctx.stroke();
+          } else {
+            // Sin camino maestro, conexión directa
+            ctx.beginPath();
+            ctx.moveTo(fromNode.x, fromNode.y);
+            ctx.lineTo(toNode.x, toNode.y);
+            ctx.strokeStyle = '#16a34a';
+            ctx.lineWidth = 6;
+            ctx.stroke();
+          }
         }
       });
     }
@@ -330,7 +408,6 @@ export const GraphCanvas = ({
       ctx.lineWidth = 3;
       ctx.stroke();
 
-      // Draw node label
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
@@ -348,7 +425,7 @@ export const GraphCanvas = ({
         ctx.stroke();
       }
     }
-  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath]);
+  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath, findClosestPointOnMasterPath]);
 
   useEffect(() => {
     draw();
