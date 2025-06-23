@@ -4,10 +4,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 interface ToolbarProps {
-  activeTool: 'select' | 'addNode' | 'addEdge' | 'setMain';
-  onToolChange: (tool: 'select' | 'addNode' | 'addEdge' | 'setMain') => void;
+  activeTool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath';
+  onToolChange: (tool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath') => void;
   onClear: () => void;
-  onCalculateOptimal: () => void;
+  onToggleAutoOptimal: () => void;
+  autoOptimalEnabled: boolean;
   nodeCount: number;
   edgeCount: number;
   optimalDistance?: number;
@@ -17,7 +18,8 @@ export const Toolbar = ({
   activeTool,
   onToolChange,
   onClear,
-  onCalculateOptimal,
+  onToggleAutoOptimal,
+  autoOptimalEnabled,
   nodeCount,
   edgeCount,
   optimalDistance
@@ -55,15 +57,24 @@ export const Toolbar = ({
             >
               Marcar Principal
             </Button>
+            <Button
+              variant={activeTool === 'masterPath' ? 'default' : 'outline'}
+              onClick={() => onToolChange('masterPath')}
+              size="sm"
+              className="bg-purple-600 hover:bg-purple-700 text-white"
+            >
+              Camino Maestro
+            </Button>
           </div>
           
           <div className="flex gap-2">
             <Button
-              onClick={onCalculateOptimal}
-              className="bg-green-600 hover:bg-green-700"
+              onClick={onToggleAutoOptimal}
+              variant={autoOptimalEnabled ? 'default' : 'outline'}
+              className={autoOptimalEnabled ? 'bg-green-600 hover:bg-green-700' : ''}
               size="sm"
             >
-              Calcular Ruta Óptima
+              {autoOptimalEnabled ? 'Auto-Óptimo ON' : 'Auto-Óptimo OFF'}
             </Button>
             <Button
               onClick={onClear}

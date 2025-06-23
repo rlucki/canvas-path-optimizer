@@ -5,7 +5,7 @@ import { GraphAlgorithms } from '@/utils/dijkstra';
 import { toast } from 'sonner';
 
 interface GraphCanvasProps {
-  activeTool: 'select' | 'addNode' | 'addEdge' | 'setMain';
+  activeTool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath';
   graph: Graph;
   onGraphChange: (graph: Graph) => void;
   optimalPaths?: Map<string, any>;
@@ -58,19 +58,35 @@ export const GraphCanvas = ({
             isMain: graph.nodes.length === 0,
             label: `Bloque ${graph.nodes.length + 1}`
           };
+
+          // Crear conexión automática al nodo principal si hay más de un nodo
+          const mainNode = graph.nodes.find(n => n.isMain);
+          let newEdges = [...graph.edges];
+          
+          if (mainNode && graph.nodes.length > 0) {
+            const autoEdge: Edge = {
+              id: `edge-${Date.now()}`,
+              from: mainNode.id,
+              to: newNode.id,
+              weight: 1
+            };
+            newEdges.push(autoEdge);
+          }
+
           onGraphChange({
-            ...graph,
-            nodes: [...graph.nodes, newNode]
+            nodes: [...graph.nodes, newNode],
+            edges: newEdges
           });
-          toast.success(`Bloque agregado: ${newNode.label}`);
+          toast.success(`${newNode.label} agregado${mainNode ? ' y conectado automáticamente' : ''}`);
         }
         break;
 
       case 'addEdge':
+      case 'masterPath':
         if (clickedNode) {
           if (!edgeStart) {
             setEdgeStart(clickedNode.id);
-            toast.info('Selecciona el segundo bloque para conectar');
+            toast.info(`Selecciona el segundo bloque para ${activeTool === 'masterPath' ? 'crear camino maestro' : 'conectar'}`);
           } else if (edgeStart !== clickedNode.id) {
             const edgeExists = graph.edges.some(edge =>
               (edge.from === edgeStart && edge.to === clickedNode.id) ||
@@ -82,13 +98,14 @@ export const GraphCanvas = ({
                 id: `edge-${Date.now()}`,
                 from: edgeStart,
                 to: clickedNode.id,
-                weight: 1
+                weight: 1,
+                isMaster: activeTool === 'masterPath'
               };
               onGraphChange({
                 ...graph,
                 edges: [...graph.edges, newEdge]
               });
-              toast.success('Conexión creada');
+              toast.success(activeTool === 'masterPath' ? 'Camino maestro creado' : 'Conexión creada');
             } else {
               toast.warning('Ya existe una conexión entre estos bloques');
             }
@@ -181,7 +198,7 @@ export const GraphCanvas = ({
       ctx.stroke();
     }
 
-    // Draw edges
+    // Draw edges (normal first, then master path, then optimal)
     graph.edges.forEach(edge => {
       const fromNode = graph.nodes.find(n => n.id === edge.from);
       const toNode = graph.nodes.find(n => n.id === edge.to);
@@ -190,8 +207,14 @@ export const GraphCanvas = ({
         ctx.beginPath();
         ctx.moveTo(fromNode.x, fromNode.y);
         ctx.lineTo(toNode.x, toNode.y);
-        ctx.strokeStyle = '#64748b';
-        ctx.lineWidth = 2;
+        
+        if (edge.isMaster) {
+          ctx.strokeStyle = '#9333ea';
+          ctx.lineWidth = 4;
+        } else {
+          ctx.strokeStyle = '#64748b';
+          ctx.lineWidth = 2;
+        }
         ctx.stroke();
 
         // Draw distance label
@@ -199,7 +222,7 @@ export const GraphCanvas = ({
         const midY = (fromNode.y + toNode.y) / 2;
         const distance = Math.sqrt(Math.pow(toNode.x - fromNode.x, 2) + Math.pow(toNode.y - fromNode.y, 2));
         
-        ctx.fillStyle = '#475569';
+        ctx.fillStyle = edge.isMaster ? '#9333ea' : '#475569';
         ctx.font = '12px sans-serif';
         ctx.fillText(distance.toFixed(0), midX + 5, midY - 5);
       }
@@ -219,7 +242,7 @@ export const GraphCanvas = ({
               ctx.moveTo(fromNode.x, fromNode.y);
               ctx.lineTo(toNode.x, toNode.y);
               ctx.strokeStyle = '#16a34a';
-              ctx.lineWidth = 4;
+              ctx.lineWidth = 6;
               ctx.stroke();
             }
           }

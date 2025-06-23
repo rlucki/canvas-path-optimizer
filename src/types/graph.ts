@@ -12,6 +12,7 @@ export interface Edge {
   from: string;
   to: string;
   weight: number;
+  isMaster?: boolean; // Nuevo: marca si es parte del camino maestro
 }
 
 export interface Graph {
