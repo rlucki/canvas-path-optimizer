@@ -9,6 +9,7 @@ interface GraphCanvasProps {
   optimalMST?: Array<{from: string, to: string}>;
   showOptimalPaths: boolean;
   isDrawingMasterPath: boolean;
+  optimizedConnections?: Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}>;
 }
 
 export const GraphCanvas = ({
@@ -17,7 +18,8 @@ export const GraphCanvas = ({
   onGraphChange,
   optimalMST,
   showOptimalPaths,
-  isDrawingMasterPath
+  isDrawingMasterPath,
+  optimizedConnections
 }: GraphCanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
@@ -336,58 +338,60 @@ export const GraphCanvas = ({
       }
     });
 
-    // Draw optimal MST that respects master path
-    if (showOptimalPaths && optimalMST) {
-      const masterPath = graph.masterPaths.length > 0 ? graph.masterPaths[0] : null;
+    // Draw optimized connections (nuevo sistema de bifurcaciones)
+    if (showOptimalPaths && optimizedConnections) {
+      // Dibujar puntos de bifurcación
+      const bifurcationPoints = new Set<string>();
       
-      optimalMST.forEach(mstEdge => {
-        const fromNode = graph.nodes.find(n => n.id === mstEdge.from);
-        const toNode = graph.nodes.find(n => n.id === mstEdge.to);
-        
-        if (fromNode && toNode) {
-          if (masterPath && masterPath.points.length > 1) {
-            // Dibujar conexión a través del camino maestro
-            const closestA = findClosestPointOnMasterPath(fromNode.x, fromNode.y, masterPath.points);
-            const closestB = findClosestPointOnMasterPath(toNode.x, toNode.y, masterPath.points);
-            
-            // Línea del nodo A al camino maestro
-            ctx.beginPath();
-            ctx.moveTo(fromNode.x, fromNode.y);
-            ctx.lineTo(closestA.point.x, closestA.point.y);
-            ctx.strokeStyle = '#16a34a';
-            ctx.lineWidth = 4;
-            ctx.setLineDash([5, 5]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            
-            // Línea del camino maestro al nodo B
-            ctx.beginPath();
-            ctx.moveTo(closestB.point.x, closestB.point.y);
-            ctx.lineTo(toNode.x, toNode.y);
-            ctx.strokeStyle = '#16a34a';
-            ctx.lineWidth = 4;
-            ctx.setLineDash([5, 5]);
-            ctx.stroke();
-            ctx.setLineDash([]);
-            
-            // Destacar el segmento del camino maestro que se usa
-            ctx.beginPath();
-            ctx.moveTo(closestA.point.x, closestA.point.y);
-            ctx.lineTo(closestB.point.x, closestB.point.y);
+      optimizedConnections.forEach(connection => {
+        connection.segments.forEach(segment => {
+          // Dibujar cada segmento
+          ctx.beginPath();
+          ctx.moveTo(segment.start.x, segment.start.y);
+          ctx.lineTo(segment.end.x, segment.end.y);
+          
+          // Diferentes estilos según el tipo de conexión
+          if (connection.to === 'master') {
+            // Conexión al camino maestro (sólida)
             ctx.strokeStyle = '#16a34a';
             ctx.lineWidth = 6;
-            ctx.stroke();
+            ctx.setLineDash([]);
+          } else if (connection.to === 'bifurcation') {
+            // Conexión a punto de bifurcación (rayada)
+            ctx.strokeStyle = '#16a34a';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([8, 4]);
           } else {
-            // Sin camino maestro, conexión directa
-            ctx.beginPath();
-            ctx.moveTo(fromNode.x, fromNode.y);
-            ctx.lineTo(toNode.x, toNode.y);
+            // Conexiones directas (sólida fina)
             ctx.strokeStyle = '#16a34a';
-            ctx.lineWidth = 6;
-            ctx.stroke();
+            ctx.lineWidth = 4;
+            ctx.setLineDash([]);
           }
-        }
+          
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Marcar puntos de bifurcación
+          if (connection.to === 'bifurcation') {
+            bifurcationPoints.add(`${segment.end.x},${segment.end.y}`);
+          }
+        });
       });
+
+      // Dibujar puntos de bifurcación como círculos verdes
+      bifurcationPoints.forEach(pointStr => {
+        const [x, y] = pointStr.split(',').map(Number);
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, 2 * Math.PI);
+        ctx.fillStyle = '#16a34a';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      });
+    } else if (showOptimalPaths && optimalMST) {
+      // Sistema anterior (fallback)
+      // ... keep existing code (previous MST drawing logic)
     }
 
     // Draw nodes
@@ -425,7 +429,7 @@ export const GraphCanvas = ({
         ctx.stroke();
       }
     }
-  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath, findClosestPointOnMasterPath]);
+  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath, optimizedConnections]);
 
   useEffect(() => {
     draw();

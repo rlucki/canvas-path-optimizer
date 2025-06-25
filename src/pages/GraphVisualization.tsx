@@ -10,6 +10,7 @@ const GraphVisualization = () => {
   const [activeTool, setActiveTool] = useState<'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath'>('addNode');
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [], masterPaths: [] });
   const [optimalMST, setOptimalMST] = useState<Array<{from: string, to: string}> | undefined>();
+  const [optimizedConnections, setOptimizedConnections] = useState<Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}> | undefined>();
   const [showOptimalPaths, setShowOptimalPaths] = useState(false);
   const [optimalDistance, setOptimalDistance] = useState<number | undefined>();
   const [autoOptimalEnabled, setAutoOptimalEnabled] = useState(true);
@@ -24,6 +25,7 @@ const GraphVisualization = () => {
         const mst = GraphAlgorithms.findMinimumSpanningTree(graph);
         
         setOptimalMST(mst.edges);
+        setOptimizedConnections(mst.optimizedConnections);
         setOptimalDistance(mst.totalWeight);
         setShowOptimalPaths(true);
       } catch (error) {
@@ -31,6 +33,7 @@ const GraphVisualization = () => {
       }
     } else {
       setOptimalMST(undefined);
+      setOptimizedConnections(undefined);
       setOptimalDistance(undefined);
       setShowOptimalPaths(false);
     }
@@ -99,6 +102,7 @@ const GraphVisualization = () => {
             optimalMST={optimalMST}
             showOptimalPaths={showOptimalPaths}
             isDrawingMasterPath={isDrawingMasterPath}
+            optimizedConnections={optimizedConnections}
           />
         </div>
 
@@ -121,7 +125,8 @@ const GraphVisualization = () => {
                 <li><span className="inline-block w-3 h-3 bg-red-600 rounded-full mr-2"></span>Bloque Principal</li>
                 <li><span className="inline-block w-3 h-3 bg-indigo-600 rounded-full mr-2"></span>Bloques Normales</li>
                 <li><span className="inline-block w-8 h-0.5 bg-purple-600 mr-2"></span>Camino Maestro</li>
-                <li><span className="inline-block w-8 h-0.5 bg-green-600 mr-2"></span>Camino Óptimo (MST)</li>
+                <li><span className="inline-block w-8 h-0.5 bg-green-600 mr-2"></span>Camino Óptimo con Bifurcaciones</li>
+                <li><span className="inline-block w-3 h-3 bg-green-600 rounded-full mr-2"></span>Puntos de Bifurcación</li>
                 <li><span className="inline-block w-8 h-0.5 bg-gray-600 mr-2"></span>Conexiones Manuales</li>
               </ul>
             </div>
