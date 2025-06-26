@@ -1,3 +1,4 @@
+
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Node, Edge, Graph, MasterPath } from '@/types/graph';
 import { toast } from 'sonner';
@@ -108,52 +109,73 @@ export const GraphCanvas = ({
   }, [graph.nodes]);
 
   const findPathInOptimizedConnections = useCallback((startNodeId: string, endNodeId: string, connections: Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}>): PathSegment[] | null => {
-    // Crear un grafo a partir de las conexiones optimizadas
-    const nodePositions = new Map<string, {x: number, y: number}>();
-    const adjacencyList = new Map<string, Array<{nodeId: string, segment: {start: {x: number, y: number}, end: {x: number, y: number}}}>>();
+    // Crear un mapa de todas las posiciones (nodos + puntos de conexión)
+    const allPositions = new Map<string, {x: number, y: number}>();
+    const adjacencyList = new Map<string, Array<{nodeId: string, distance: number}>>();
 
-    // Agregar posiciones de nodos
+    // Agregar posiciones de nodos reales
     graph.nodes.forEach(node => {
-      nodePositions.set(node.id, {x: node.x, y: node.y});
+      allPositions.set(node.id, {x: node.x, y: node.y});
+      adjacencyList.set(node.id, []);
     });
 
-    // Agregar puntos de bifurcación y camino maestro a partir de las conexiones
+    // Procesar todas las conexiones para crear el grafo
     connections.forEach(connection => {
       connection.segments.forEach(segment => {
-        const startKey = `${segment.start.x},${segment.start.y}`;
-        const endKey = `${segment.end.x},${segment.end.y}`;
+        const startKey = `${segment.start.x.toFixed(1)},${segment.start.y.toFixed(1)}`;
+        const endKey = `${segment.end.x.toFixed(1)},${segment.end.y.toFixed(1)}`;
         
-        nodePositions.set(startKey, segment.start);
-        nodePositions.set(endKey, segment.end);
-
+        // Agregar posiciones
+        allPositions.set(startKey, segment.start);
+        allPositions.set(endKey, segment.end);
+        
         if (!adjacencyList.has(startKey)) adjacencyList.set(startKey, []);
         if (!adjacencyList.has(endKey)) adjacencyList.set(endKey, []);
 
-        adjacencyList.get(startKey)?.push({nodeId: endKey, segment});
-        adjacencyList.get(endKey)?.push({nodeId: startKey, segment});
+        const distance = calculateDistance(segment.start.x, segment.start.y, segment.end.x, segment.end.y);
+        
+        // Crear conexiones bidireccionales
+        adjacencyList.get(startKey)?.push({nodeId: endKey, distance});
+        adjacencyList.get(endKey)?.push({nodeId: startKey, distance});
       });
 
-      // Conectar nodos a sus posiciones
+      // Conectar nodos reales a sus posiciones más cercanas en la red
       const fromNode = graph.nodes.find(n => n.id === connection.from);
       if (fromNode) {
         const nodeKey = connection.from;
-        const posKey = `${fromNode.x},${fromNode.y}`;
         
-        if (!adjacencyList.has(nodeKey)) adjacencyList.set(nodeKey, []);
-        if (!adjacencyList.has(posKey)) adjacencyList.set(posKey, []);
-
-        adjacencyList.get(nodeKey)?.push({nodeId: posKey, segment: {start: {x: fromNode.x, y: fromNode.y}, end: {x: fromNode.x, y: fromNode.y}}});
-        adjacencyList.get(posKey)?.push({nodeId: nodeKey, segment: {start: {x: fromNode.x, y: fromNode.y}, end: {x: fromNode.x, y: fromNode.y}}});
+        // Encontrar el punto más cercano en los segmentos
+        let closestPoint = null;
+        let minDistance = Infinity;
+        
+        connection.segments.forEach(segment => {
+          const startDistance = calculateDistance(fromNode.x, fromNode.y, segment.start.x, segment.start.y);
+          const endDistance = calculateDistance(fromNode.x, fromNode.y, segment.end.x, segment.end.y);
+          
+          if (startDistance < minDistance) {
+            minDistance = startDistance;
+            closestPoint = `${segment.start.x.toFixed(1)},${segment.start.y.toFixed(1)}`;
+          }
+          if (endDistance < minDistance) {
+            minDistance = endDistance;
+            closestPoint = `${segment.end.x.toFixed(1)},${segment.end.y.toFixed(1)}`;
+          }
+        });
+        
+        if (closestPoint && minDistance < 30) { // Solo conectar si está muy cerca
+          adjacencyList.get(nodeKey)?.push({nodeId: closestPoint, distance: minDistance});
+          adjacencyList.get(closestPoint)?.push({nodeId: nodeKey, distance: minDistance});
+        }
       }
     });
 
-    // Usar Dijkstra para encontrar el camino más corto
+    // Usar algoritmo de Dijkstra para encontrar el camino más corto
     const distances = new Map<string, number>();
-    const previous = new Map<string, {nodeId: string, segment: {start: {x: number, y: number}, end: {x: number, y: number}}} | null>();
+    const previous = new Map<string, string | null>();
     const unvisited = new Set<string>();
 
-    // Inicializar distancias
-    for (const nodeId of nodePositions.keys()) {
+    // Inicializar
+    for (const nodeId of allPositions.keys()) {
       distances.set(nodeId, nodeId === startNodeId ? 0 : Infinity);
       previous.set(nodeId, null);
       unvisited.add(nodeId);
@@ -173,7 +195,6 @@ export const GraphCanvas = ({
       }
 
       if (!currentNode || minDistance === Infinity) break;
-
       unvisited.delete(currentNode);
 
       if (currentNode === endNodeId) break;
@@ -182,43 +203,42 @@ export const GraphCanvas = ({
       const neighbors = adjacencyList.get(currentNode) || [];
       for (const neighbor of neighbors) {
         if (unvisited.has(neighbor.nodeId)) {
-          const segmentDistance = calculateDistance(
-            neighbor.segment.start.x, neighbor.segment.start.y,
-            neighbor.segment.end.x, neighbor.segment.end.y
-          );
-          const altDistance = (distances.get(currentNode) || 0) + segmentDistance;
+          const altDistance = (distances.get(currentNode) || 0) + neighbor.distance;
           
           if (altDistance < (distances.get(neighbor.nodeId) || Infinity)) {
             distances.set(neighbor.nodeId, altDistance);
-            previous.set(neighbor.nodeId, {nodeId: currentNode, segment: neighbor.segment});
+            previous.set(neighbor.nodeId, currentNode);
           }
         }
       }
     }
 
     // Reconstruir el camino
-    const pathSegments: PathSegment[] = [];
-    let current = endNodeId;
+    if (!previous.get(endNodeId)) return null;
+
+    const pathNodes: string[] = [];
+    let current: string | null = endNodeId;
     
-    while (previous.get(current)) {
-      const prev = previous.get(current);
-      if (prev) {
-        const segment = prev.segment;
-        const distance = calculateDistance(
-          segment.start.x, segment.start.y,
-          segment.end.x, segment.end.y
-        );
-        
-        if (distance > 0) { // Solo agregar segmentos con distancia > 0
-          pathSegments.unshift({
-            start: segment.start,
-            end: segment.end,
+    while (current !== null) {
+      pathNodes.unshift(current);
+      current = previous.get(current) || null;
+    }
+
+    // Convertir a segmentos
+    const pathSegments: PathSegment[] = [];
+    for (let i = 0; i < pathNodes.length - 1; i++) {
+      const currentPos = allPositions.get(pathNodes[i]);
+      const nextPos = allPositions.get(pathNodes[i + 1]);
+      
+      if (currentPos && nextPos) {
+        const distance = calculateDistance(currentPos.x, currentPos.y, nextPos.x, nextPos.y);
+        if (distance > 0.1) { // Evitar segmentos muy pequeños
+          pathSegments.push({
+            start: currentPos,
+            end: nextPos,
             distance
           });
         }
-        current = prev.nodeId;
-      } else {
-        break;
       }
     }
 
@@ -231,13 +251,13 @@ export const GraphCanvas = ({
     
     if (!startNode || !endNode) return null;
 
-    // Si tenemos conexiones optimizadas, usar ese camino
+    // Si tenemos conexiones optimizadas, usar SOLO ese camino
     if (optimizedConnections && optimizedConnections.length > 0) {
       const path = findPathInOptimizedConnections(startNodeId, endNodeId, optimizedConnections);
       if (path) return path;
     }
 
-    // Fallback: línea directa
+    // Solo como último recurso: línea directa (cuando no hay conexiones optimizadas)
     return [{
       start: { x: startNode.x, y: startNode.y },
       end: { x: endNode.x, y: endNode.y },
