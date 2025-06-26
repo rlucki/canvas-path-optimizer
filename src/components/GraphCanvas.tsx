@@ -12,6 +12,12 @@ interface GraphCanvasProps {
   optimizedConnections?: Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}>;
 }
 
+interface PathSegment {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  distance: number;
+}
+
 export const GraphCanvas = ({
   activeTool,
   graph,
@@ -28,6 +34,8 @@ export const GraphCanvas = ({
   const [edgeStart, setEdgeStart] = useState<string | null>(null);
   const [currentMasterPath, setCurrentMasterPath] = useState<Array<{ x: number; y: number }>>([]);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [measurementPath, setMeasurementPath] = useState<PathSegment[] | null>(null);
+  const [measuredNodeId, setMeasuredNodeId] = useState<string | null>(null);
 
   const getCanvasCoordinates = useCallback((event: MouseEvent | React.MouseEvent) => {
     const canvas = canvasRef.current;
@@ -99,8 +107,146 @@ export const GraphCanvas = ({
     return graph.nodes.find(node => node.isMain) || (graph.nodes.length > 0 ? graph.nodes[0] : null);
   }, [graph.nodes]);
 
+  const findShortestPath = useCallback((startNodeId: string, endNodeId: string): PathSegment[] | null => {
+    const startNode = graph.nodes.find(n => n.id === startNodeId);
+    const endNode = graph.nodes.find(n => n.id === endNodeId);
+    
+    if (!startNode || !endNode) return null;
+
+    // Si tenemos conexiones optimizadas, usar ese camino
+    if (optimizedConnections && optimizedConnections.length > 0) {
+      const path = this.findPathInOptimizedConnections(startNodeId, endNodeId, optimizedConnections);
+      if (path) return path;
+    }
+
+    // Fallback: línea directa
+    return [{
+      start: { x: startNode.x, y: startNode.y },
+      end: { x: endNode.x, y: endNode.y },
+      distance: calculateDistance(startNode.x, startNode.y, endNode.x, endNode.y)
+    }];
+  }, [graph.nodes, optimizedConnections, calculateDistance]);
+
+  const findPathInOptimizedConnections = useCallback((startNodeId: string, endNodeId: string, connections: Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}>): PathSegment[] | null => {
+    // Crear un grafo a partir de las conexiones optimizadas
+    const nodePositions = new Map<string, {x: number, y: number}>();
+    const adjacencyList = new Map<string, Array<{nodeId: string, segment: {start: {x: number, y: number}, end: {x: number, y: number}}}>>();
+
+    // Agregar posiciones de nodos
+    graph.nodes.forEach(node => {
+      nodePositions.set(node.id, {x: node.x, y: node.y});
+    });
+
+    // Agregar puntos de bifurcación y camino maestro a partir de las conexiones
+    connections.forEach(connection => {
+      connection.segments.forEach(segment => {
+        const startKey = `${segment.start.x},${segment.start.y}`;
+        const endKey = `${segment.end.x},${segment.end.y}`;
+        
+        nodePositions.set(startKey, segment.start);
+        nodePositions.set(endKey, segment.end);
+
+        if (!adjacencyList.has(startKey)) adjacencyList.set(startKey, []);
+        if (!adjacencyList.has(endKey)) adjacencyList.set(endKey, []);
+
+        adjacencyList.get(startKey)?.push({nodeId: endKey, segment});
+        adjacencyList.get(endKey)?.push({nodeId: startKey, segment});
+      });
+
+      // Conectar nodos a sus posiciones
+      const fromNode = graph.nodes.find(n => n.id === connection.from);
+      if (fromNode) {
+        const nodeKey = connection.from;
+        const posKey = `${fromNode.x},${fromNode.y}`;
+        
+        if (!adjacencyList.has(nodeKey)) adjacencyList.set(nodeKey, []);
+        if (!adjacencyList.has(posKey)) adjacencyList.set(posKey, []);
+
+        adjacencyList.get(nodeKey)?.push({nodeId: posKey, segment: {start: {x: fromNode.x, y: fromNode.y}, end: {x: fromNode.x, y: fromNode.y}}});
+        adjacencyList.get(posKey)?.push({nodeId: nodeKey, segment: {start: {x: fromNode.x, y: fromNode.y}, end: {x: fromNode.x, y: fromNode.y}}});
+      }
+    });
+
+    // Usar Dijkstra para encontrar el camino más corto
+    const distances = new Map<string, number>();
+    const previous = new Map<string, {nodeId: string, segment: {start: {x: number, y: number}, end: {x: number, y: number}}} | null>();
+    const unvisited = new Set<string>();
+
+    // Inicializar distancias
+    for (const nodeId of nodePositions.keys()) {
+      distances.set(nodeId, nodeId === startNodeId ? 0 : Infinity);
+      previous.set(nodeId, null);
+      unvisited.add(nodeId);
+    }
+
+    while (unvisited.size > 0) {
+      // Encontrar nodo no visitado con distancia mínima
+      let currentNode: string | null = null;
+      let minDistance = Infinity;
+      
+      for (const nodeId of unvisited) {
+        const distance = distances.get(nodeId) || Infinity;
+        if (distance < minDistance) {
+          minDistance = distance;
+          currentNode = nodeId;
+        }
+      }
+
+      if (!currentNode || minDistance === Infinity) break;
+
+      unvisited.delete(currentNode);
+
+      if (currentNode === endNodeId) break;
+
+      // Actualizar distancias a vecinos
+      const neighbors = adjacencyList.get(currentNode) || [];
+      for (const neighbor of neighbors) {
+        if (unvisited.has(neighbor.nodeId)) {
+          const segmentDistance = calculateDistance(
+            neighbor.segment.start.x, neighbor.segment.start.y,
+            neighbor.segment.end.x, neighbor.segment.end.y
+          );
+          const altDistance = (distances.get(currentNode) || 0) + segmentDistance;
+          
+          if (altDistance < (distances.get(neighbor.nodeId) || Infinity)) {
+            distances.set(neighbor.nodeId, altDistance);
+            previous.set(neighbor.nodeId, {nodeId: currentNode, segment: neighbor.segment});
+          }
+        }
+      }
+    }
+
+    // Reconstruir el camino
+    const pathSegments: PathSegment[] = [];
+    let current = endNodeId;
+    
+    while (previous.get(current)) {
+      const prev = previous.get(current);
+      if (prev) {
+        const segment = prev.segment;
+        const distance = calculateDistance(
+          segment.start.x, segment.start.y,
+          segment.end.x, segment.end.y
+        );
+        
+        if (distance > 0) { // Solo agregar segmentos con distancia > 0
+          pathSegments.unshift({
+            start: segment.start,
+            end: segment.end,
+            distance
+          });
+        }
+        current = prev.nodeId;
+      } else {
+        break;
+      }
+    }
+
+    return pathSegments.length > 0 ? pathSegments : null;
+  }, [graph.nodes, calculateDistance]);
+
   const handleCanvasClick = useCallback((event: React.MouseEvent) => {
-    if (isDrawingMasterPath) return; // No permitir clicks normales mientras se dibuja
+    if (isDrawingMasterPath) return;
     
     const coords = getCanvasCoordinates(event);
     const clickedNode = findNodeAt(coords.x, coords.y);
@@ -121,26 +267,6 @@ export const GraphCanvas = ({
             nodes: [...graph.nodes, newNode]
           });
           toast.success(`${newNode.label} agregado`);
-        }
-        break;
-
-      case 'measureDistance':
-        if (clickedNode) {
-          const mainNode = getMainNode();
-          if (!mainNode) {
-            toast.error('No hay bloque principal definido');
-            return;
-          }
-          
-          if (clickedNode.id === mainNode.id) {
-            toast.info('Este es el bloque principal (distancia: 0 metros)');
-            return;
-          }
-
-          const distance = calculateDistance(clickedNode.x, clickedNode.y, mainNode.x, mainNode.y);
-          toast.success(`Distancia desde ${clickedNode.label} al bloque principal: ${distance.toFixed(1)} metros`);
-        } else {
-          toast.info('Haz clic en un bloque para medir su distancia al bloque principal');
         }
         break;
 
@@ -195,8 +321,53 @@ export const GraphCanvas = ({
       case 'select':
         setSelectedNode(clickedNode?.id || null);
         break;
+
+      case 'measureDistance':
+        if (clickedNode) {
+          const mainNode = getMainNode();
+          if (!mainNode) {
+            toast.error('No hay bloque principal definido');
+            setMeasurementPath(null);
+            setMeasuredNodeId(null);
+            return;
+          }
+          
+          if (clickedNode.id === mainNode.id) {
+            toast.info('Este es el bloque principal (distancia: 0 metros)');
+            setMeasurementPath(null);
+            setMeasuredNodeId(null);
+            return;
+          }
+
+          // Encontrar el camino y calcular segmentos
+          const pathSegments = findShortestPath(mainNode.id, clickedNode.id);
+          
+          if (pathSegments) {
+            setMeasurementPath(pathSegments);
+            setMeasuredNodeId(clickedNode.id);
+            
+            const totalDistance = pathSegments.reduce((sum, segment) => sum + segment.distance, 0);
+            const segmentDistances = pathSegments.map((segment, index) => `Segmento ${index + 1}: ${segment.distance.toFixed(1)}m`).join(' + ');
+            
+            toast.success(`Distancia total desde ${clickedNode.label} al bloque principal: ${totalDistance.toFixed(1)} metros\nRecorrido: ${segmentDistances}`);
+          } else {
+            const directDistance = calculateDistance(clickedNode.x, clickedNode.y, mainNode.x, mainNode.y);
+            setMeasurementPath([{
+              start: { x: clickedNode.x, y: clickedNode.y },
+              end: { x: mainNode.x, y: mainNode.y },
+              distance: directDistance
+            }]);
+            setMeasuredNodeId(clickedNode.id);
+            toast.success(`Distancia directa desde ${clickedNode.label} al bloque principal: ${directDistance.toFixed(1)} metros`);
+          }
+        } else {
+          toast.info('Haz clic en un bloque para medir su distancia al bloque principal');
+          setMeasurementPath(null);
+          setMeasuredNodeId(null);
+        }
+        break;
     }
-  }, [activeTool, graph, onGraphChange, edgeStart, getCanvasCoordinates, findNodeAt, isDrawingMasterPath, getMainNode, calculateDistance]);
+  }, [activeTool, graph, onGraphChange, edgeStart, getCanvasCoordinates, findNodeAt, isDrawingMasterPath, getMainNode, calculateDistance, findShortestPath]);
 
   const handleMouseDown = useCallback((event: React.MouseEvent) => {
     if (isDrawingMasterPath && activeTool === 'masterPath') {
@@ -278,6 +449,14 @@ export const GraphCanvas = ({
       setIsDrawing(false);
     }
   }, [isDrawingMasterPath]);
+
+  // Limpiar medición cuando se cambia de herramienta
+  useEffect(() => {
+    if (activeTool !== 'measureDistance') {
+      setMeasurementPath(null);
+      setMeasuredNodeId(null);
+    }
+  }, [activeTool]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -418,8 +597,19 @@ export const GraphCanvas = ({
         ctx.stroke();
       });
     } else if (showOptimalPaths && optimalMST) {
-      // Sistema anterior (fallback)
-      // ... keep existing code (previous MST drawing logic)
+      optimalMST.forEach(edge => {
+        const fromNode = graph.nodes.find(n => n.id === edge.from);
+        const toNode = graph.nodes.find(n => n.id === edge.to);
+        
+        if (fromNode && toNode) {
+          ctx.beginPath();
+          ctx.moveTo(fromNode.x, fromNode.y);
+          ctx.lineTo(toNode.x, toNode.y);
+          ctx.strokeStyle = '#16a34a';
+          ctx.lineWidth = 4;
+          ctx.stroke();
+        }
+      });
     }
 
     // Draw nodes
@@ -446,6 +636,57 @@ export const GraphCanvas = ({
       ctx.fillText(node.label.replace('Bloque ', ''), node.x, node.y + 4);
     });
 
+    // Draw measurement path
+    if (measurementPath && activeTool === 'measureDistance') {
+      measurementPath.forEach((segment, index) => {
+        // Dibujar el segmento
+        ctx.beginPath();
+        ctx.moveTo(segment.start.x, segment.start.y);
+        ctx.lineTo(segment.end.x, segment.end.y);
+        
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 4;
+        ctx.setLineDash([8, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Dibujar la distancia del segmento
+        const midX = (segment.start.x + segment.end.x) / 2;
+        const midY = (segment.start.y + segment.end.y) / 2;
+        
+        ctx.fillStyle = '#1e40af';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(midX - 25, midY - 10, 50, 20);
+        ctx.fillStyle = '#1e40af';
+        ctx.fillText(`${segment.distance.toFixed(1)}m`, midX, midY + 4);
+
+        // Dibujar puntos de conexión
+        ctx.beginPath();
+        ctx.arc(segment.start.x, segment.start.y, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = '#3b82f6';
+        ctx.fill();
+        
+        ctx.beginPath();
+        ctx.arc(segment.end.x, segment.end.y, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = '#3b82f6';
+        ctx.fill();
+      });
+
+      // Resaltar el nodo medido
+      const measuredNode = graph.nodes.find(n => n.id === measuredNodeId);
+      if (measuredNode) {
+        ctx.beginPath();
+        ctx.arc(measuredNode.x, measuredNode.y, 35, 0, 2 * Math.PI);
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 4;
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
     // Highlight node when measuring distance
     if (activeTool === 'measureDistance') {
       const mainNode = getMainNode();
@@ -459,7 +700,7 @@ export const GraphCanvas = ({
         ctx.setLineDash([]);
       }
     }
-  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath, optimizedConnections, getMainNode]);
+  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath, optimizedConnections, measurementPath, measuredNodeId, getMainNode]);
 
   useEffect(() => {
     draw();
