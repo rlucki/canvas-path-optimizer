@@ -1,4 +1,3 @@
-
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { Node, Edge, Graph, MasterPath } from '@/types/graph';
 import { toast } from 'sonner';
@@ -17,6 +16,8 @@ interface PathSegment {
   start: { x: number; y: number };
   end: { x: number; y: number };
   distance: number;
+  type: 'connection' | 'bifurcation' | 'master';
+  label?: string;
 }
 
 export const GraphCanvas = ({
@@ -57,49 +58,6 @@ export const GraphCanvas = ({
     }) || null;
   }, [graph.nodes]);
 
-  const findClosestPointOnMasterPath = useCallback((nodeX: number, nodeY: number, masterPath: Array<{x: number, y: number}>): {point: {x: number, y: number}, distance: number} => {
-    let minDistance = Infinity;
-    let closestPoint = masterPath[0];
-
-    for (let i = 0; i < masterPath.length - 1; i++) {
-      const start = masterPath[i];
-      const end = masterPath[i + 1];
-      
-      const A = nodeX - start.x;
-      const B = nodeY - start.y;
-      const C = end.x - start.x;
-      const D = end.y - start.y;
-
-      const dot = A * C + B * D;
-      const lenSq = C * C + D * D;
-      
-      let param = -1;
-      if (lenSq !== 0) {
-        param = dot / lenSq;
-      }
-
-      let xx, yy;
-      if (param < 0) {
-        xx = start.x;
-        yy = start.y;
-      } else if (param > 1) {
-        xx = end.x;
-        yy = end.y;
-      } else {
-        xx = start.x + param * C;
-        yy = start.y + param * D;
-      }
-
-      const distance = Math.sqrt(Math.pow(nodeX - xx, 2) + Math.pow(nodeY - yy, 2));
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestPoint = {x: xx, y: yy};
-      }
-    }
-
-    return {point: closestPoint, distance: minDistance};
-  }, []);
-
   const calculateDistance = useCallback((x1: number, y1: number, x2: number, y2: number): number => {
     return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
   }, []);
@@ -108,10 +66,15 @@ export const GraphCanvas = ({
     return graph.nodes.find(node => node.isMain) || (graph.nodes.length > 0 ? graph.nodes[0] : null);
   }, [graph.nodes]);
 
-  const findPathInOptimizedConnections = useCallback((startNodeId: string, endNodeId: string, connections: Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}>): PathSegment[] | null => {
-    // Crear un mapa de todas las posiciones (nodos + puntos de conexión)
+  const findOptimizedPathToMainNode = useCallback((targetNodeId: string): PathSegment[] | null => {
+    const mainNode = getMainNode();
+    if (!mainNode || !optimizedConnections || optimizedConnections.length === 0) {
+      return null;
+    }
+
+    // Crear un mapa de todas las posiciones conocidas
     const allPositions = new Map<string, {x: number, y: number}>();
-    const adjacencyList = new Map<string, Array<{nodeId: string, distance: number}>>();
+    const adjacencyList = new Map<string, Array<{nodeId: string, distance: number, segmentInfo: {start: {x: number, y: number}, end: {x: number, y: number}, type: string}}>>();
 
     // Agregar posiciones de nodos reales
     graph.nodes.forEach(node => {
@@ -119,8 +82,8 @@ export const GraphCanvas = ({
       adjacencyList.set(node.id, []);
     });
 
-    // Procesar todas las conexiones para crear el grafo
-    connections.forEach(connection => {
+    // Procesar todas las conexiones optimizadas
+    optimizedConnections.forEach(connection => {
       connection.segments.forEach(segment => {
         const startKey = `${segment.start.x.toFixed(1)},${segment.start.y.toFixed(1)}`;
         const endKey = `${segment.end.x.toFixed(1)},${segment.end.y.toFixed(1)}`;
@@ -134,19 +97,37 @@ export const GraphCanvas = ({
 
         const distance = calculateDistance(segment.start.x, segment.start.y, segment.end.x, segment.end.y);
         
-        // Crear conexiones bidireccionales
-        adjacencyList.get(startKey)?.push({nodeId: endKey, distance});
-        adjacencyList.get(endKey)?.push({nodeId: startKey, distance});
+        // Determinar el tipo de conexión
+        let connectionType = 'connection';
+        if (connection.to === 'master') connectionType = 'master';
+        else if (connection.to === 'bifurcation') connectionType = 'bifurcation';
+
+        // Crear conexiones bidireccionales con información del segmento
+        const segmentInfo = {
+          start: segment.start,
+          end: segment.end,
+          type: connectionType
+        };
+
+        adjacencyList.get(startKey)?.push({
+          nodeId: endKey, 
+          distance, 
+          segmentInfo
+        });
+        adjacencyList.get(endKey)?.push({
+          nodeId: startKey, 
+          distance, 
+          segmentInfo
+        });
       });
 
-      // Conectar nodos reales a sus posiciones más cercanas en la red
+      // Conectar nodos reales a la red de conexiones
       const fromNode = graph.nodes.find(n => n.id === connection.from);
       if (fromNode) {
-        const nodeKey = connection.from;
-        
         // Encontrar el punto más cercano en los segmentos
         let closestPoint = null;
         let minDistance = Infinity;
+        let closestSegment = null;
         
         connection.segments.forEach(segment => {
           const startDistance = calculateDistance(fromNode.x, fromNode.y, segment.start.x, segment.start.y);
@@ -155,29 +136,45 @@ export const GraphCanvas = ({
           if (startDistance < minDistance) {
             minDistance = startDistance;
             closestPoint = `${segment.start.x.toFixed(1)},${segment.start.y.toFixed(1)}`;
+            closestSegment = segment;
           }
           if (endDistance < minDistance) {
             minDistance = endDistance;
             closestPoint = `${segment.end.x.toFixed(1)},${segment.end.y.toFixed(1)}`;
+            closestSegment = segment;
           }
         });
         
-        if (closestPoint && minDistance < 30) { // Solo conectar si está muy cerca
-          adjacencyList.get(nodeKey)?.push({nodeId: closestPoint, distance: minDistance});
-          adjacencyList.get(closestPoint)?.push({nodeId: nodeKey, distance: minDistance});
+        if (closestPoint && minDistance < 30 && closestSegment) {
+          const segmentInfo = {
+            start: { x: fromNode.x, y: fromNode.y },
+            end: allPositions.get(closestPoint)!,
+            type: 'connection'
+          };
+
+          adjacencyList.get(connection.from)?.push({
+            nodeId: closestPoint, 
+            distance: minDistance, 
+            segmentInfo
+          });
+          adjacencyList.get(closestPoint)?.push({
+            nodeId: connection.from, 
+            distance: minDistance, 
+            segmentInfo
+          });
         }
       }
     });
 
     // Usar algoritmo de Dijkstra para encontrar el camino más corto
     const distances = new Map<string, number>();
-    const previous = new Map<string, string | null>();
+    const previous = new Map<string, {nodeId: string | null, segmentInfo: any}>();
     const unvisited = new Set<string>();
 
     // Inicializar
     for (const nodeId of allPositions.keys()) {
-      distances.set(nodeId, nodeId === startNodeId ? 0 : Infinity);
-      previous.set(nodeId, null);
+      distances.set(nodeId, nodeId === targetNodeId ? 0 : Infinity);
+      previous.set(nodeId, {nodeId: null, segmentInfo: null});
       unvisited.add(nodeId);
     }
 
@@ -197,7 +194,7 @@ export const GraphCanvas = ({
       if (!currentNode || minDistance === Infinity) break;
       unvisited.delete(currentNode);
 
-      if (currentNode === endNodeId) break;
+      if (currentNode === mainNode.id) break;
 
       // Actualizar distancias a vecinos
       const neighbors = adjacencyList.get(currentNode) || [];
@@ -207,63 +204,38 @@ export const GraphCanvas = ({
           
           if (altDistance < (distances.get(neighbor.nodeId) || Infinity)) {
             distances.set(neighbor.nodeId, altDistance);
-            previous.set(neighbor.nodeId, currentNode);
+            previous.set(neighbor.nodeId, {
+              nodeId: currentNode,
+              segmentInfo: neighbor.segmentInfo
+            });
           }
         }
       }
     }
 
     // Reconstruir el camino
-    if (!previous.get(endNodeId)) return null;
+    if (!previous.get(mainNode.id)?.nodeId) return null;
 
-    const pathNodes: string[] = [];
-    let current: string | null = endNodeId;
+    const pathSegments: PathSegment[] = [];
+    let current: string | null = mainNode.id;
     
     while (current !== null) {
-      pathNodes.unshift(current);
-      current = previous.get(current) || null;
-    }
-
-    // Convertir a segmentos
-    const pathSegments: PathSegment[] = [];
-    for (let i = 0; i < pathNodes.length - 1; i++) {
-      const currentPos = allPositions.get(pathNodes[i]);
-      const nextPos = allPositions.get(pathNodes[i + 1]);
-      
-      if (currentPos && nextPos) {
-        const distance = calculateDistance(currentPos.x, currentPos.y, nextPos.x, nextPos.y);
-        if (distance > 0.1) { // Evitar segmentos muy pequeños
-          pathSegments.push({
-            start: currentPos,
-            end: nextPos,
-            distance
-          });
-        }
+      const prevInfo = previous.get(current);
+      if (prevInfo?.nodeId && prevInfo?.segmentInfo) {
+        const segment = prevInfo.segmentInfo;
+        pathSegments.unshift({
+          start: segment.start,
+          end: segment.end,
+          distance: calculateDistance(segment.start.x, segment.start.y, segment.end.x, segment.end.y),
+          type: segment.type as 'connection' | 'bifurcation' | 'master',
+          label: `${calculateDistance(segment.start.x, segment.start.y, segment.end.x, segment.end.y).toFixed(1)}m`
+        });
       }
+      current = prevInfo?.nodeId || null;
     }
 
     return pathSegments.length > 0 ? pathSegments : null;
-  }, [graph.nodes, calculateDistance]);
-
-  const findShortestPath = useCallback((startNodeId: string, endNodeId: string): PathSegment[] | null => {
-    const startNode = graph.nodes.find(n => n.id === startNodeId);
-    const endNode = graph.nodes.find(n => n.id === endNodeId);
-    
-    if (!startNode || !endNode) return null;
-
-    // Si tenemos conexiones optimizadas, usar SOLO ese camino
-    if (optimizedConnections && optimizedConnections.length > 0) {
-      const path = findPathInOptimizedConnections(startNodeId, endNodeId, optimizedConnections);
-      if (path) return path;
-    }
-
-    // Solo como último recurso: línea directa (cuando no hay conexiones optimizadas)
-    return [{
-      start: { x: startNode.x, y: startNode.y },
-      end: { x: endNode.x, y: endNode.y },
-      distance: calculateDistance(startNode.x, startNode.y, endNode.x, endNode.y)
-    }];
-  }, [graph.nodes, optimizedConnections, calculateDistance, findPathInOptimizedConnections]);
+  }, [graph.nodes, optimizedConnections, calculateDistance, getMainNode]);
 
   const handleCanvasClick = useCallback((event: React.MouseEvent) => {
     if (isDrawingMasterPath) return;
@@ -359,26 +331,31 @@ export const GraphCanvas = ({
             return;
           }
 
-          // Encontrar el camino y calcular segmentos
-          const pathSegments = findShortestPath(mainNode.id, clickedNode.id);
+          // Buscar el camino optimizado
+          const pathSegments = findOptimizedPathToMainNode(clickedNode.id);
           
-          if (pathSegments) {
+          if (pathSegments && pathSegments.length > 0) {
             setMeasurementPath(pathSegments);
             setMeasuredNodeId(clickedNode.id);
             
             const totalDistance = pathSegments.reduce((sum, segment) => sum + segment.distance, 0);
-            const segmentDistances = pathSegments.map((segment, index) => `Segmento ${index + 1}: ${segment.distance.toFixed(1)}m`).join(' + ');
+            const segmentDetails = pathSegments.map((segment, index) => 
+              `Tramo ${index + 1}: ${segment.distance.toFixed(1)}m (${segment.type})`
+            ).join('\n');
             
-            toast.success(`Distancia total desde ${clickedNode.label} al bloque principal: ${totalDistance.toFixed(1)} metros\nRecorrido: ${segmentDistances}`);
+            toast.success(`Recorrido desde ${clickedNode.label} al bloque principal:\n${segmentDetails}\nDistancia total: ${totalDistance.toFixed(1)} metros`);
           } else {
+            // Fallback: línea directa si no hay conexión optimizada
             const directDistance = calculateDistance(clickedNode.x, clickedNode.y, mainNode.x, mainNode.y);
             setMeasurementPath([{
               start: { x: clickedNode.x, y: clickedNode.y },
               end: { x: mainNode.x, y: mainNode.y },
-              distance: directDistance
+              distance: directDistance,
+              type: 'connection',
+              label: `${directDistance.toFixed(1)}m (directo)`
             }]);
             setMeasuredNodeId(clickedNode.id);
-            toast.success(`Distancia directa desde ${clickedNode.label} al bloque principal: ${directDistance.toFixed(1)} metros`);
+            toast.warning(`No hay camino optimizado. Distancia directa: ${directDistance.toFixed(1)} metros`);
           }
         } else {
           toast.info('Haz clic en un bloque para medir su distancia al bloque principal');
@@ -387,7 +364,7 @@ export const GraphCanvas = ({
         }
         break;
     }
-  }, [activeTool, graph, onGraphChange, edgeStart, getCanvasCoordinates, findNodeAt, isDrawingMasterPath, getMainNode, calculateDistance, findShortestPath]);
+  }, [activeTool, graph, onGraphChange, edgeStart, getCanvasCoordinates, findNodeAt, isDrawingMasterPath, getMainNode, calculateDistance, findOptimizedPathToMainNode]);
 
   const handleMouseDown = useCallback((event: React.MouseEvent) => {
     if (isDrawingMasterPath && activeTool === 'masterPath') {
@@ -656,15 +633,26 @@ export const GraphCanvas = ({
       ctx.fillText(node.label.replace('Bloque ', ''), node.x, node.y + 4);
     });
 
-    // Draw measurement path
+    // Draw measurement path with individual segment lengths
     if (measurementPath && activeTool === 'measureDistance') {
       measurementPath.forEach((segment, index) => {
-        // Dibujar el segmento
+        // Dibujar el segmento con color según tipo
         ctx.beginPath();
         ctx.moveTo(segment.start.x, segment.start.y);
         ctx.lineTo(segment.end.x, segment.end.y);
         
-        ctx.strokeStyle = '#3b82f6';
+        // Color según tipo de conexión
+        switch (segment.type) {
+          case 'master':
+            ctx.strokeStyle = '#3b82f6'; // Azul para conexión a master path
+            break;
+          case 'bifurcation':
+            ctx.strokeStyle = '#f59e0b'; // Amber para bifurcaciones
+            break;
+          default:
+            ctx.strokeStyle = '#3b82f6'; // Azul por defecto
+        }
+        
         ctx.lineWidth = 4;
         ctx.setLineDash([8, 4]);
         ctx.stroke();
@@ -674,35 +662,46 @@ export const GraphCanvas = ({
         const midX = (segment.start.x + segment.end.x) / 2;
         const midY = (segment.start.y + segment.end.y) / 2;
         
-        ctx.fillStyle = '#1e40af';
-        ctx.font = 'bold 14px sans-serif';
-        ctx.textAlign = 'center';
+        // Fondo blanco para el texto
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(midX - 25, midY - 10, 50, 20);
+        ctx.fillRect(midX - 30, midY - 12, 60, 20);
+        ctx.strokeStyle = '#1e40af';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(midX - 30, midY - 12, 60, 20);
+        
+        // Texto con la distancia
         ctx.fillStyle = '#1e40af';
-        ctx.fillText(`${segment.distance.toFixed(1)}m`, midX, midY + 4);
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${segment.distance.toFixed(1)}m`, midX, midY + 2);
 
         // Dibujar puntos de conexión
         ctx.beginPath();
         ctx.arc(segment.start.x, segment.start.y, 4, 0, 2 * Math.PI);
-        ctx.fillStyle = '#3b82f6';
+        ctx.fillStyle = segment.type === 'bifurcation' ? '#f59e0b' : '#3b82f6';
         ctx.fill();
         
         ctx.beginPath();
         ctx.arc(segment.end.x, segment.end.y, 4, 0, 2 * Math.PI);
-        ctx.fillStyle = '#3b82f6';
+        ctx.fillStyle = segment.type === 'bifurcation' ? '#f59e0b' : '#3b82f6';
         ctx.fill();
       });
 
       // Mostrar distancia total del recorrido
       const totalDistance = measurementPath.reduce((sum, seg) => sum + seg.distance, 0);
       const lastPoint = measurementPath[measurementPath.length - 1].end;
+      
+      // Fondo para el total
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(lastPoint.x - 50, lastPoint.y - 40, 100, 25);
+      ctx.strokeStyle = '#dc2626';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(lastPoint.x - 50, lastPoint.y - 40, 100, 25);
+      
       ctx.font = 'bold 14px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(lastPoint.x - 40, lastPoint.y - 34, 80, 20);
-      ctx.fillStyle = '#1e40af';
-      ctx.fillText(`Total: ${totalDistance.toFixed(1)}m`, lastPoint.x, lastPoint.y - 20);
+      ctx.fillStyle = '#dc2626';
+      ctx.fillText(`Total: ${totalDistance.toFixed(1)}m`, lastPoint.x, lastPoint.y - 22);
 
       // Resaltar el nodo medido
       const measuredNode = graph.nodes.find(n => n.id === measuredNodeId);
