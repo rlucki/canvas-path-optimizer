@@ -107,26 +107,6 @@ export const GraphCanvas = ({
     return graph.nodes.find(node => node.isMain) || (graph.nodes.length > 0 ? graph.nodes[0] : null);
   }, [graph.nodes]);
 
-  const findShortestPath = useCallback((startNodeId: string, endNodeId: string): PathSegment[] | null => {
-    const startNode = graph.nodes.find(n => n.id === startNodeId);
-    const endNode = graph.nodes.find(n => n.id === endNodeId);
-    
-    if (!startNode || !endNode) return null;
-
-    // Si tenemos conexiones optimizadas, usar ese camino
-    if (optimizedConnections && optimizedConnections.length > 0) {
-      const path = this.findPathInOptimizedConnections(startNodeId, endNodeId, optimizedConnections);
-      if (path) return path;
-    }
-
-    // Fallback: línea directa
-    return [{
-      start: { x: startNode.x, y: startNode.y },
-      end: { x: endNode.x, y: endNode.y },
-      distance: calculateDistance(startNode.x, startNode.y, endNode.x, endNode.y)
-    }];
-  }, [graph.nodes, optimizedConnections, calculateDistance]);
-
   const findPathInOptimizedConnections = useCallback((startNodeId: string, endNodeId: string, connections: Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}>): PathSegment[] | null => {
     // Crear un grafo a partir de las conexiones optimizadas
     const nodePositions = new Map<string, {x: number, y: number}>();
@@ -244,6 +224,26 @@ export const GraphCanvas = ({
 
     return pathSegments.length > 0 ? pathSegments : null;
   }, [graph.nodes, calculateDistance]);
+
+  const findShortestPath = useCallback((startNodeId: string, endNodeId: string): PathSegment[] | null => {
+    const startNode = graph.nodes.find(n => n.id === startNodeId);
+    const endNode = graph.nodes.find(n => n.id === endNodeId);
+    
+    if (!startNode || !endNode) return null;
+
+    // Si tenemos conexiones optimizadas, usar ese camino
+    if (optimizedConnections && optimizedConnections.length > 0) {
+      const path = findPathInOptimizedConnections(startNodeId, endNodeId, optimizedConnections);
+      if (path) return path;
+    }
+
+    // Fallback: línea directa
+    return [{
+      start: { x: startNode.x, y: startNode.y },
+      end: { x: endNode.x, y: endNode.y },
+      distance: calculateDistance(startNode.x, startNode.y, endNode.x, endNode.y)
+    }];
+  }, [graph.nodes, optimizedConnections, calculateDistance, findPathInOptimizedConnections]);
 
   const handleCanvasClick = useCallback((event: React.MouseEvent) => {
     if (isDrawingMasterPath) return;
