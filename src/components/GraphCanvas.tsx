@@ -694,6 +694,16 @@ export const GraphCanvas = ({
         ctx.fill();
       });
 
+      // Mostrar distancia total del recorrido
+      const totalDistance = measurementPath.reduce((sum, seg) => sum + seg.distance, 0);
+      const lastPoint = measurementPath[measurementPath.length - 1].end;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(lastPoint.x - 40, lastPoint.y - 34, 80, 20);
+      ctx.fillStyle = '#1e40af';
+      ctx.fillText(`Total: ${totalDistance.toFixed(1)}m`, lastPoint.x, lastPoint.y - 20);
+
       // Resaltar el nodo medido
       const measuredNode = graph.nodes.find(n => n.id === measuredNodeId);
       if (measuredNode) {
