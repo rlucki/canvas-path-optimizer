@@ -1,4 +1,3 @@
-
 import { Node, MasterPath } from '@/types/graph';
 
 interface ConnectionPoint {
@@ -14,9 +13,45 @@ interface OptimizedConnection {
   totalDistance: number;
 }
 
+interface ExistingConnection {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  connectedNodes: string[];
+}
+
 export class MSTOptimizer {
   private static calculateDistance(x1: number, y1: number, x2: number, y2: number): number {
     return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  }
+
+  private static findClosestPointOnLine(nodeX: number, nodeY: number, lineStart: {x: number, y: number}, lineEnd: {x: number, y: number}): {point: {x: number, y: number}, distance: number} {
+    const A = nodeX - lineStart.x;
+    const B = nodeY - lineStart.y;
+    const C = lineEnd.x - lineStart.x;
+    const D = lineEnd.y - lineStart.y;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    
+    let param = -1;
+    if (lenSq !== 0) {
+      param = dot / lenSq;
+    }
+
+    let xx, yy;
+    if (param < 0) {
+      xx = lineStart.x;
+      yy = lineStart.y;
+    } else if (param > 1) {
+      xx = lineEnd.x;
+      yy = lineEnd.y;
+    } else {
+      xx = lineStart.x + param * C;
+      yy = lineStart.y + param * D;
+    }
+
+    const distance = this.calculateDistance(nodeX, nodeY, xx, yy);
+    return {point: {x: xx, y: yy}, distance};
   }
 
   private static findClosestPointOnMasterPath(nodeX: number, nodeY: number, masterPath: Array<{x: number, y: number}>): {point: {x: number, y: number}, distance: number, position: number} {
@@ -28,35 +63,12 @@ export class MSTOptimizer {
       const start = masterPath[i];
       const end = masterPath[i + 1];
       
-      const A = nodeX - start.x;
-      const B = nodeY - start.y;
-      const C = end.x - start.x;
-      const D = end.y - start.y;
-
-      const dot = A * C + B * D;
-      const lenSq = C * C + D * D;
+      const result = this.findClosestPointOnLine(nodeX, nodeY, start, end);
       
-      let param = -1;
-      if (lenSq !== 0) {
-        param = dot / lenSq;
-      }
-
-      let xx, yy;
-      if (param < 0) {
-        xx = start.x;
-        yy = start.y;
-      } else if (param > 1) {
-        xx = end.x;
-        yy = end.y;
-      } else {
-        xx = start.x + param * C;
-        yy = start.y + param * D;
-      }
-
-      const distance = this.calculateDistance(nodeX, nodeY, xx, yy);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestPoint = {x: xx, y: yy};
+      if (result.distance < minDistance) {
+        minDistance = result.distance;
+        closestPoint = result.point;
+        
         // Calcular posición a lo largo del camino maestro
         let accumulatedDistance = 0;
         for (let j = 0; j < i; j++) {
@@ -65,9 +77,10 @@ export class MSTOptimizer {
             masterPath[j + 1].x, masterPath[j + 1].y
           );
         }
-        if (param >= 0 && param <= 1) {
-          accumulatedDistance += param * this.calculateDistance(start.x, start.y, end.x, end.y);
-        }
+        
+        const segmentDistance = this.calculateDistance(start.x, start.y, end.x, end.y);
+        const pointOnSegmentDistance = this.calculateDistance(start.x, start.y, closestPoint.x, closestPoint.y);
+        accumulatedDistance += pointOnSegmentDistance;
         bestPosition = accumulatedDistance;
       }
     }
@@ -77,26 +90,150 @@ export class MSTOptimizer {
 
   static optimizeConnections(nodes: Node[], masterPath: MasterPath): Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}> {
     if (!masterPath || masterPath.points.length < 2) {
-      // Sin camino maestro, usar conexiones directas MST tradicional
       return this.createDirectMST(nodes);
     }
 
-    // Encontrar puntos de conexión al camino maestro para cada nodo
-    const connectionPoints: ConnectionPoint[] = nodes.map(node => {
-      const closest = this.findClosestPointOnMasterPath(node.x, node.y, masterPath.points);
-      return {
-        nodeId: node.id,
-        masterPathPoint: closest.point,
-        distanceToMaster: closest.distance,
-        position: closest.position
-      };
-    });
+    const connections: Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}> = [];
+    const connectedNodes = new Set<string>();
+    const existingConnections: ExistingConnection[] = [];
 
-    // Agrupar nodos que están cerca en el camino maestro
-    const groups = this.groupNearbyConnections(connectionPoints, nodes);
+    // Procesar nodos de uno en uno, eligiendo la mejor conexión para cada uno
+    const remainingNodes = [...nodes];
     
-    // Crear conexiones optimizadas
-    return this.createOptimizedConnections(groups, nodes, masterPath);
+    // Comenzar con el nodo más cercano al camino maestro
+    let currentNode = this.findClosestNodeToMasterPath(remainingNodes, masterPath);
+    if (currentNode) {
+      const closestToMaster = this.findClosestPointOnMasterPath(currentNode.x, currentNode.y, masterPath.points);
+      
+      connections.push({
+        from: currentNode.id,
+        to: 'master',
+        segments: [{
+          start: { x: currentNode.x, y: currentNode.y },
+          end: closestToMaster.point
+        }]
+      });
+
+      existingConnections.push({
+        start: { x: currentNode.x, y: currentNode.y },
+        end: closestToMaster.point,
+        connectedNodes: [currentNode.id]
+      });
+
+      connectedNodes.add(currentNode.id);
+      remainingNodes.splice(remainingNodes.findIndex(n => n.id === currentNode.id), 1);
+    }
+
+    // Para cada nodo restante, encontrar la mejor conexión
+    while (remainingNodes.length > 0) {
+      let bestNode: Node | null = null;
+      let bestConnection: any = null;
+      let bestDistance = Infinity;
+
+      for (const node of remainingNodes) {
+        // Opción 1: Conectar directamente al camino maestro
+        const masterConnection = this.findClosestPointOnMasterPath(node.x, node.y, masterPath.points);
+        
+        if (masterConnection.distance < bestDistance) {
+          bestDistance = masterConnection.distance;
+          bestNode = node;
+          bestConnection = {
+            type: 'master',
+            point: masterConnection.point,
+            distance: masterConnection.distance
+          };
+        }
+
+        // Opción 2: Conectar a una conexión existente
+        for (const existingConn of existingConnections) {
+          const connectionPoint = this.findClosestPointOnLine(
+            node.x, node.y,
+            existingConn.start,
+            existingConn.end
+          );
+
+          if (connectionPoint.distance < bestDistance) {
+            bestDistance = connectionPoint.distance;
+            bestNode = node;
+            bestConnection = {
+              type: 'existing',
+              point: connectionPoint.point,
+              distance: connectionPoint.distance,
+              existingConnection: existingConn
+            };
+          }
+        }
+      }
+
+      if (bestNode && bestConnection) {
+        if (bestConnection.type === 'master') {
+          // Conectar al camino maestro
+          connections.push({
+            from: bestNode.id,
+            to: 'master',
+            segments: [{
+              start: { x: bestNode.x, y: bestNode.y },
+              end: bestConnection.point
+            }]
+          });
+
+          existingConnections.push({
+            start: { x: bestNode.x, y: bestNode.y },
+            end: bestConnection.point,
+            connectedNodes: [bestNode.id]
+          });
+        } else {
+          // Conectar a una conexión existente
+          connections.push({
+            from: bestNode.id,
+            to: 'bifurcation',
+            segments: [{
+              start: { x: bestNode.x, y: bestNode.y },
+              end: bestConnection.point
+            }]
+          });
+
+          // Crear nueva conexión que incluye este punto de bifurcación
+          existingConnections.push({
+            start: { x: bestNode.x, y: bestNode.y },
+            end: bestConnection.point,
+            connectedNodes: [bestNode.id]
+          });
+
+          // Extender la conexión existente hasta el punto de bifurcación
+          const existingConn = bestConnection.existingConnection;
+          existingConnections.push({
+            start: bestConnection.point,
+            end: existingConn.end,
+            connectedNodes: [...existingConn.connectedNodes, bestNode.id]
+          });
+        }
+
+        connectedNodes.add(bestNode.id);
+        remainingNodes.splice(remainingNodes.findIndex(n => n.id === bestNode.id), 1);
+      } else {
+        break;
+      }
+    }
+
+    return connections;
+  }
+
+  private static findClosestNodeToMasterPath(nodes: Node[], masterPath: MasterPath): Node | null {
+    if (nodes.length === 0) return null;
+
+    let closestNode = nodes[0];
+    let minDistance = Infinity;
+
+    for (const node of nodes) {
+      const distance = this.findClosestPointOnMasterPath(node.x, node.y, masterPath.points).distance;
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestNode = node;
+      }
+    }
+
+    return closestNode;
   }
 
   private static groupNearbyConnections(connectionPoints: ConnectionPoint[], nodes: Node[]): Array<ConnectionPoint[]> {
