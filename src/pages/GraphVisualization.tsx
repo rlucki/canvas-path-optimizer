@@ -7,7 +7,7 @@ import { GraphAlgorithms } from '@/utils/dijkstra';
 import { toast } from 'sonner';
 
 const GraphVisualization = () => {
-  const [activeTool, setActiveTool] = useState<'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath'>('addNode');
+  const [activeTool, setActiveTool] = useState<'select' | 'addNode' | 'measureDistance' | 'setMain' | 'masterPath'>('addNode');
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [], masterPaths: [] });
   const [optimalMST, setOptimalMST] = useState<Array<{from: string, to: string}> | undefined>();
   const [optimizedConnections, setOptimizedConnections] = useState<Array<{from: string, to: string, segments: Array<{start: {x: number, y: number}, end: {x: number, y: number}}>}> | undefined>();
@@ -53,13 +53,18 @@ const GraphVisualization = () => {
     toast.info(`Auto-óptimo ${!autoOptimalEnabled ? 'activado' : 'desactivado'}`);
   };
 
-  const handleToolChange = (tool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath') => {
+  const handleToolChange = (tool: 'select' | 'addNode' | 'measureDistance' | 'setMain' | 'masterPath') => {
     if (tool === 'masterPath' && !isDrawingMasterPath) {
       setIsDrawingMasterPath(true);
       toast.info('Dibuja el camino maestro. Haz clic en "Finalizar" cuando termines.');
     } else if (tool !== 'masterPath' && isDrawingMasterPath) {
       setIsDrawingMasterPath(false);
     }
+    
+    if (tool === 'measureDistance') {
+      toast.info('Haz clic en cualquier bloque para ver su distancia al bloque principal');
+    }
+    
     setActiveTool(tool);
   };
 
@@ -113,7 +118,7 @@ const GraphVisualization = () => {
               <h4 className="font-medium text-gray-900 mb-2">Herramientas:</h4>
               <ul className="space-y-1">
                 <li><strong>Agregar Bloque:</strong> Haz clic en el canvas para agregar nuevos bloques</li>
-                <li><strong>Conectar:</strong> Haz clic en dos bloques para crear una conexión manual</li>
+                <li><strong>Medir Distancia:</strong> Haz clic en un bloque para ver su distancia al bloque principal</li>
                 <li><strong>Marcar Principal:</strong> Haz clic en un bloque para marcarlo como punto de inicio</li>
                 <li><strong>Camino Maestro:</strong> Dibuja una polilínea que debe ser respetada en la ruta</li>
                 <li><strong>Seleccionar:</strong> Arrastra bloques para reposicionarlos</li>
@@ -127,7 +132,7 @@ const GraphVisualization = () => {
                 <li><span className="inline-block w-8 h-0.5 bg-purple-600 mr-2"></span>Camino Maestro</li>
                 <li><span className="inline-block w-8 h-0.5 bg-green-600 mr-2"></span>Camino Óptimo con Bifurcaciones</li>
                 <li><span className="inline-block w-3 h-3 bg-green-600 rounded-full mr-2"></span>Puntos de Bifurcación</li>
-                <li><span className="inline-block w-8 h-0.5 bg-gray-600 mr-2"></span>Conexiones Manuales</li>
+                <li><span className="inline-block w-8 h-0.5 bg-blue-600 mr-2"></span>Medición de Distancia</li>
               </ul>
             </div>
           </div>

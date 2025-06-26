@@ -4,8 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 interface ToolbarProps {
-  activeTool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath';
-  onToolChange: (tool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath') => void;
+  activeTool: 'select' | 'addNode' | 'measureDistance' | 'setMain' | 'masterPath';
+  onToolChange: (tool: 'select' | 'addNode' | 'measureDistance' | 'setMain' | 'masterPath') => void;
   onClear: () => void;
   onToggleAutoOptimal: () => void;
   autoOptimalEnabled: boolean;
@@ -50,12 +50,13 @@ export const Toolbar = ({
               Agregar Bloque
             </Button>
             <Button
-              variant={activeTool === 'addEdge' ? 'default' : 'outline'}
-              onClick={() => onToolChange('addEdge')}
+              variant={activeTool === 'measureDistance' ? 'default' : 'outline'}
+              onClick={() => onToolChange('measureDistance')}
               size="sm"
               disabled={isDrawingMasterPath}
+              className={activeTool === 'measureDistance' ? 'bg-blue-600 hover:bg-blue-700' : ''}
             >
-              Conectar
+              Medir Distancia
             </Button>
             <Button
               variant={activeTool === 'setMain' ? 'default' : 'outline'}

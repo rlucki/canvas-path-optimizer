@@ -3,7 +3,7 @@ import { Node, Edge, Graph, MasterPath } from '@/types/graph';
 import { toast } from 'sonner';
 
 interface GraphCanvasProps {
-  activeTool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath';
+  activeTool: 'select' | 'addNode' | 'addEdge' | 'setMain' | 'masterPath' | 'measureDistance';
   graph: Graph;
   onGraphChange: (graph: Graph) => void;
   optimalMST?: Array<{from: string, to: string}>;
@@ -91,6 +91,14 @@ export const GraphCanvas = ({
     return {point: closestPoint, distance: minDistance};
   }, []);
 
+  const calculateDistance = useCallback((x1: number, y1: number, x2: number, y2: number): number => {
+    return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+  }, []);
+
+  const getMainNode = useCallback((): Node | null => {
+    return graph.nodes.find(node => node.isMain) || (graph.nodes.length > 0 ? graph.nodes[0] : null);
+  }, [graph.nodes]);
+
   const handleCanvasClick = useCallback((event: React.MouseEvent) => {
     if (isDrawingMasterPath) return; // No permitir clicks normales mientras se dibuja
     
@@ -113,6 +121,26 @@ export const GraphCanvas = ({
             nodes: [...graph.nodes, newNode]
           });
           toast.success(`${newNode.label} agregado`);
+        }
+        break;
+
+      case 'measureDistance':
+        if (clickedNode) {
+          const mainNode = getMainNode();
+          if (!mainNode) {
+            toast.error('No hay bloque principal definido');
+            return;
+          }
+          
+          if (clickedNode.id === mainNode.id) {
+            toast.info('Este es el bloque principal (distancia: 0 metros)');
+            return;
+          }
+
+          const distance = calculateDistance(clickedNode.x, clickedNode.y, mainNode.x, mainNode.y);
+          toast.success(`Distancia desde ${clickedNode.label} al bloque principal: ${distance.toFixed(1)} metros`);
+        } else {
+          toast.info('Haz clic en un bloque para medir su distancia al bloque principal');
         }
         break;
 
@@ -168,7 +196,7 @@ export const GraphCanvas = ({
         setSelectedNode(clickedNode?.id || null);
         break;
     }
-  }, [activeTool, graph, onGraphChange, edgeStart, getCanvasCoordinates, findNodeAt, isDrawingMasterPath]);
+  }, [activeTool, graph, onGraphChange, edgeStart, getCanvasCoordinates, findNodeAt, isDrawingMasterPath, getMainNode, calculateDistance]);
 
   const handleMouseDown = useCallback((event: React.MouseEvent) => {
     if (isDrawingMasterPath && activeTool === 'masterPath') {
@@ -418,18 +446,20 @@ export const GraphCanvas = ({
       ctx.fillText(node.label.replace('Bloque ', ''), node.x, node.y + 4);
     });
 
-    // Draw edge preview when creating edge
-    if (edgeStart && activeTool === 'addEdge') {
-      const startNode = graph.nodes.find(n => n.id === edgeStart);
-      if (startNode) {
+    // Highlight node when measuring distance
+    if (activeTool === 'measureDistance') {
+      const mainNode = getMainNode();
+      if (mainNode) {
         ctx.beginPath();
-        ctx.arc(startNode.x, startNode.y, 25, 0, 2 * Math.PI);
-        ctx.strokeStyle = '#fbbf24';
+        ctx.arc(mainNode.x, mainNode.y, 30, 0, 2 * Math.PI);
+        ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
         ctx.stroke();
+        ctx.setLineDash([]);
       }
     }
-  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath, optimizedConnections]);
+  }, [graph, selectedNode, edgeStart, activeTool, showOptimalPaths, optimalMST, currentMasterPath, optimizedConnections, getMainNode]);
 
   useEffect(() => {
     draw();
